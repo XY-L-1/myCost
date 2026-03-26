@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import { runMigrations } from "../db/migration";
-import { seedCategoriesIfNeeded } from "../db/seedCategories";
 import * as SecureStore from "expo-secure-store";
 import { generateUUID } from "../utils/uuid";
 
@@ -22,7 +21,7 @@ type AppInitState = {
       * Entry point for app startup.
       * - Runs database migrations
       * - Ensures deviceId exists
-      * - Seeds default categories if needed
+      * - Defers category seeding until after auth sync
       */
    initialize: () => Promise<void>;
 };
@@ -56,9 +55,6 @@ export const useAppInitStore = create<AppInitState>((set) => ({
 
          // 2. Ensure deviceId exists
          const deviceId = await getDeviceId();
-
-         // 3. Seed default categories (runs only once)
-         await seedCategoriesIfNeeded(deviceId);
 
          // Mark app as ready
          set({ ready: true, initializing: false });

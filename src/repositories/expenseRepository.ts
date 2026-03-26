@@ -1,5 +1,6 @@
 import { exec, query, run } from "../db/database";
 import { Expense, ExpenseSchema } from "../types/expense";
+import { notifyExpenseMutation } from "../sync/syncEvents";
 
 /**
  * ExpenseRepository
@@ -36,6 +37,9 @@ export class ExpenseRepository {
          expense.userId,
          ]
       );
+
+      // Notify sync layer without coupling UI to network logic.
+      notifyExpenseMutation();
    }
 
    /**
@@ -68,6 +72,9 @@ export class ExpenseRepository {
          expense.id,
          ]
       );
+
+      // Notify sync layer without coupling UI to network logic.
+      notifyExpenseMutation();
    }
 
    /**
@@ -82,6 +89,9 @@ export class ExpenseRepository {
          `,
          [deletedAt, id]
       );
+
+      // Notify sync layer without coupling UI to network logic.
+      notifyExpenseMutation();
    }
 
    /**

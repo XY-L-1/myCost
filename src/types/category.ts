@@ -6,6 +6,7 @@ import { z } from "zod";
 export const CategorySchema = z.object({
    id: z.string(),
    name: z.string(),
+   normalizedName: z.string().nullable().optional(),
    createdAt: z.string(),
    updatedAt: z.string(),
    deletedAt: z.string().nullable(),

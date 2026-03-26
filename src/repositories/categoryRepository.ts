@@ -1,5 +1,7 @@
 import { exec, query, run } from "../db/database";
 import { Category, CategorySchema } from "../types/category";
+import { notifyCategoryMutation } from "../sync/syncEvents";
+import { normalizeCategoryName } from "../utils/categoryIdentity";
 // Repository 的“铁律”
 // 	•	❌ 不做业务判断
 // 	•	❌ 不管 UI
@@ -17,16 +19,19 @@ export class CategoryRepository {
    }
 
    static async insert(category: Category): Promise<void> {
+      const normalizedName = normalizeCategoryName(category.name);
+
       await run(
          `
          INSERT INTO categories (
-         id, name, createdAt, updatedAt, deletedAt,
+         id, name, normalizedName, createdAt, updatedAt, deletedAt,
          dirty, version, deviceId, userId
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
          `,
          [
          category.id,
          category.name,
+         normalizedName,
          category.createdAt,
          category.updatedAt,
          category.deletedAt,
@@ -36,6 +41,9 @@ export class CategoryRepository {
          category.userId,
          ]
       );
+
+      // Notify sync layer without coupling UI to network logic.
+      notifyCategoryMutation();
    }
 
    static async count(): Promise<number> {
@@ -44,4 +52,5 @@ export class CategoryRepository {
       );
       return rows[0]?.count ?? 0;
    }
+
 }

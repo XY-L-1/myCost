@@ -67,6 +67,27 @@ const migrations: Migration[] = [
          await exec(`CREATE INDEX IF NOT EXISTS idx_expenses_dirty ON expenses(dirty);`);
       },
    },
+   {
+      version: 2,
+      up: async () => {
+         // Add normalizedName to categories for deterministic identity.
+         await exec(`
+         ALTER TABLE categories ADD COLUMN normalizedName TEXT;
+         `);
+
+         // Backfill normalizedName for existing rows.
+         await exec(`
+         UPDATE categories
+         SET normalizedName = lower(trim(replace(name, '  ', ' ')))
+         WHERE normalizedName IS NULL;
+         `);
+
+         // Index for fast lookups and conflict checks.
+         await exec(
+            `CREATE INDEX IF NOT EXISTS idx_categories_user_norm ON categories(userId, normalizedName);`
+         );
+      },
+   },
    ];
 
    export async function runMigrations(): Promise<void> {
