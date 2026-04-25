@@ -1,12 +1,27 @@
 import { DEFAULT_CATEGORIES, normalizeCategoryName } from "../utils/categoryIdentity";
 
 const KEYWORDS_BY_CATEGORY = new Map<string, string[]>([
-  ["food", ["food", "pizza", "restaurant", "costco", "grocery", "groceries", "meal", "dining"]],
+  [
+    "food",
+    [
+      "food",
+      "pizza",
+      "restaurant",
+      "costco",
+      "grocery",
+      "groceries",
+      "meal",
+      "dining",
+      "eating",
+      "85c",
+      "99 ranch",
+    ],
+  ],
   ["gas", ["gas", "fuel", "shell", "chevron", "exxon", "mobil", "76"]],
   ["transport", ["uber", "lyft", "bus", "train", "parking", "transit", "transport"]],
   ["housing", ["rent", "mortgage", "housing", "apartment", "lease"]],
   ["utilities", ["utility", "utilities", "electric", "water", "internet", "phone"]],
-  ["healthcare", ["health", "doctor", "medical", "pharmacy", "dental"]],
+  ["healthcare", ["health", "doctor", "medical", "pharmacy", "dental", "kaiser"]],
   ["entertainment", ["movie", "cinema", "game", "netflix", "spotify", "entertainment"]],
   ["shopping", ["shopping", "amazon", "target", "walmart"]],
   ["subscription", ["subscription", "membership", "visible", "sim card"]],

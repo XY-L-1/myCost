@@ -352,9 +352,9 @@ export async function repairMissingCategoryRefs(
 /**
  * repairAmbiguousCategoryRefs
  *
- * Some legacy local caches can have real expenses attached to a placeholder
- * category named "Category". Split those rows back into default categories
- * when the description gives us a strong signal.
+ * Some legacy local caches can have real expenses attached to placeholder
+ * categories named "Category" or "Other". Split those rows back into default
+ * categories when the description gives us a strong signal.
  */
 export async function repairAmbiguousCategoryRefs(
   scope: DataScope,
@@ -366,9 +366,9 @@ export async function repairAmbiguousCategoryRefs(
     SELECT id
     FROM categories
     WHERE ownerKey = ?
-      AND LOWER(TRIM(name)) = ?;
+      AND LOWER(TRIM(name)) IN (?, ?);
     `,
-    [ownerKey, "category"]
+    [ownerKey, "category", "other"]
   );
 
   if (ambiguousCategories.length === 0) return;
