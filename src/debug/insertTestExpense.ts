@@ -1,6 +1,7 @@
 import { run } from "../db/database";
 import { generateUUID } from "../utils/uuid";
 import { CategoryRepository } from "../repositories/categoryRepository";
+import { userScope } from "../domain/dataScope";
 /**
  * insertTestExpense
  *
@@ -16,7 +17,7 @@ export async function insertTestExpense(
    deviceId: string
    ) {
    // 1. Fetch categories from local SQLite
-   const categories = await CategoryRepository.getAll();
+   const categories = await CategoryRepository.getAll(userScope(userId));
 
    if (categories.length === 0) {
       throw new Error("No categories found. Did you forget to seed categories?");
@@ -45,8 +46,9 @@ export async function insertTestExpense(
          deletedAt,
          dirty,
          version,
-         deviceId
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+         deviceId,
+         ownerKey
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
       `,
       [
          expenseId,
@@ -62,6 +64,7 @@ export async function insertTestExpense(
          1,               // dirty = 1 (important for sync)
          1,               // version = 1
          deviceId,
+         userId,
       ]
    );
 

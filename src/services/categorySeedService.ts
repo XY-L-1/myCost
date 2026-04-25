@@ -1,8 +1,10 @@
 import { query, run } from "../db/database";
+import { DataScope } from "../domain/dataScope";
 import { CategoryRepository } from "../repositories/categoryRepository";
 import {
   DEFAULT_CATEGORIES,
   deterministicCategoryId,
+  deterministicGuestCategoryId,
   normalizeCategoryName,
 } from "../utils/categoryIdentity";
 
@@ -13,7 +15,7 @@ import {
  * Uses deterministic UUIDs to keep identity stable across devices.
  */
 export async function ensureDefaultCategories(
-  userId: string,
+  scope: DataScope,
   deviceId: string
 ): Promise<void> {
   const now = new Date().toISOString();
@@ -29,8 +31,8 @@ export async function ensureDefaultCategories(
   }>(
     `SELECT id, name, normalizedName, deletedAt, createdAt
      FROM categories
-     WHERE userId = ?;`,
-    [userId]
+     WHERE ownerKey = ?;`,
+    [scope.ownerKey]
   );
 
   const groupedByNormalized = new Map<string, typeof existing>();
@@ -45,7 +47,10 @@ export async function ensureDefaultCategories(
     const name = DEFAULT_CATEGORIES[i];
     const normalized = normalizedDefaults[i];
     const group = groupedByNormalized.get(normalized) ?? [];
-    const deterministicId = deterministicCategoryId(userId, name);
+    const deterministicId =
+      scope.userId
+        ? deterministicCategoryId(scope.userId, name)
+        : deterministicGuestCategoryId(name);
 
     const deterministicRow = group.find((row) => row.id === deterministicId);
     const activeRow = group.find((row) => !row.deletedAt);
@@ -57,8 +62,9 @@ export async function ensureDefaultCategories(
         await run(
           `UPDATE categories
            SET deletedAt = NULL, updatedAt = ?, dirty = 1, version = version + 1
-           WHERE id = ?;`,
-          [now, canonical.id]
+           WHERE id = ?
+             AND ownerKey = ?;`,
+          [now, canonical.id, scope.ownerKey]
         );
       }
       continue;
@@ -69,13 +75,15 @@ export async function ensureDefaultCategories(
     await CategoryRepository.insert({
       id,
       name,
+      budget: 0,
       createdAt: now,
       updatedAt: now,
       deletedAt: null,
       dirty: 1,
       version: 1,
       deviceId,
-      userId,
+      ownerKey: scope.ownerKey,
+      userId: scope.userId,
     });
   }
 }

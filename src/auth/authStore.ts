@@ -1,8 +1,7 @@
 import { create } from "zustand";
-import { createClient, Session, User } from "@supabase/supabase-js";
-import * as SecureStore from "expo-secure-store";
-import { attachAnonymousDataToUser } from "../services/loginMergeService";
-import { supabase } from "./supabaseClient";
+import { Session, User } from "@supabase/supabase-js";
+import { isSupabaseConfigured, supabase } from "./supabaseClient";
+import { prepareSupabaseAuthStorage } from "./authStorage";
 
 /**
  * AuthState
@@ -16,26 +15,10 @@ type AuthState = {
    initializing: boolean;
 
    initialize: () => Promise<void>;
-   signInWithEmail: (email: string, password: string) => Promise<void>;
    signIn: (email: string, password: string) => Promise<void>;
    signUp: (email: string, password: string) => Promise<void>;
    signOut: () => Promise<void>;
 };
-
-// const supabase = createClient(
-//    process.env.EXPO_PUBLIC_SUPABASE_URL!,
-//    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
-//    {
-//       auth: {
-//          storage: {
-//          getItem: SecureStore.getItemAsync,
-//          setItem: SecureStore.setItemAsync,
-//          removeItem: SecureStore.deleteItemAsync,
-//          },
-//          persistSession: true,
-//       },
-//    }
-// );
 
 export const useAuthStore = create<AuthState>((set) => ({
    user: null,
@@ -49,36 +32,44 @@ export const useAuthStore = create<AuthState>((set) => ({
       * This runs once at app startup.
       */
    initialize: async () => {
-      const { data } = await supabase.auth.getSession();
-      set({
-         session: data.session,
-         user: data.session?.user ?? null,
-         initializing: false,
-      });
-   },
+      try {
+         await prepareSupabaseAuthStorage();
 
-   /**
-      * signInWithEmail
-      *
-      * Logs in the user and updates auth state.
-      */
-   signInWithEmail: async (email, password) => {
-      const { data, error } = await supabase.auth.signInWithPassword({
-         email,
-         password,
-      });
+         if (!isSupabaseConfigured) {
+            set({
+               session: null,
+               user: null,
+               initializing: false,
+            });
+            return;
+         }
 
-      if (error) {
-         throw error;
+         const { data, error } = await supabase.auth.getSession();
+         if (error) {
+            throw error;
+         }
+
+         set({
+            session: data.session,
+            user: data.session?.user ?? null,
+            initializing: false,
+         });
+
+         supabase.auth.onAuthStateChange((_event, session) => {
+            set({
+               session,
+               user: session?.user ?? null,
+               initializing: false,
+            });
+         });
+      } catch (error) {
+         console.error("[AUTH] initialization failed", error);
+         set({
+            session: null,
+            user: null,
+            initializing: false,
+         });
       }
-
-      set({
-         session: data.session,
-         user: data.user,
-      });
-
-      // Attach anonymous local data
-      await attachAnonymousDataToUser(data.user.id);
    },
 
    /**
@@ -87,6 +78,10 @@ export const useAuthStore = create<AuthState>((set) => ({
       * Alias for email/password sign-in used by UI screens.
       */
    signIn: async (email, password) => {
+      if (!isSupabaseConfigured) {
+         throw new Error("Cloud sync is not configured for this build.");
+      }
+
       const { data, error } = await supabase.auth.signInWithPassword({
          email,
          password,
@@ -101,8 +96,6 @@ export const useAuthStore = create<AuthState>((set) => ({
          user: data.user,
       });
 
-      // Attach anonymous local data
-      await attachAnonymousDataToUser(data.user.id);
    },
 
    /**
@@ -111,6 +104,10 @@ export const useAuthStore = create<AuthState>((set) => ({
       * Creates a new account. Session is not set until user verifies email.
       */
    signUp: async (email, password) => {
+      if (!isSupabaseConfigured) {
+         throw new Error("Cloud sync is not configured for this build.");
+      }
+
       const { error } = await supabase.auth.signUp({
          email,
          password,

@@ -1,4 +1,5 @@
 import { v5 as uuidv5 } from "uuid";
+import { GUEST_OWNER_KEY } from "../domain/dataScope";
 
 export const DEFAULT_CATEGORIES = [
   "Food",
@@ -22,4 +23,8 @@ export function normalizeCategoryName(name: string) {
 export function deterministicCategoryId(userId: string, name: string) {
   const normalized = normalizeCategoryName(name);
   return uuidv5(`${userId}:${normalized}`, DEFAULT_CATEGORY_NAMESPACE);
+}
+
+export function deterministicGuestCategoryId(name: string) {
+  return `${GUEST_OWNER_KEY}:${normalizeCategoryName(name)}`;
 }

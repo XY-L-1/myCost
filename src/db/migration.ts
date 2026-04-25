@@ -1,5 +1,5 @@
-// src/db/migrations.ts
 import { exec, query } from "./database";
+import { GUEST_OWNER_KEY } from "../domain/dataScope";
 
 type Migration = {
    version: number;
@@ -86,6 +86,97 @@ const migrations: Migration[] = [
          await exec(
             `CREATE INDEX IF NOT EXISTS idx_categories_user_norm ON categories(userId, normalizedName);`
          );
+      },
+   },
+   {
+      version: 3,
+      up: async () => {
+         await exec(`
+         ALTER TABLE expenses ADD COLUMN ownerKey TEXT;
+         `);
+
+         await exec(`
+         ALTER TABLE categories ADD COLUMN ownerKey TEXT;
+         `);
+
+         await exec(`
+         UPDATE expenses
+         SET ownerKey = COALESCE(userId, '${GUEST_OWNER_KEY}')
+         WHERE ownerKey IS NULL;
+         `);
+
+         await exec(`
+         UPDATE categories
+         SET ownerKey = COALESCE(userId, '${GUEST_OWNER_KEY}')
+         WHERE ownerKey IS NULL;
+         `);
+
+         await exec(
+            `CREATE INDEX IF NOT EXISTS idx_expenses_ownerKey ON expenses(ownerKey);`
+         );
+         await exec(
+            `CREATE INDEX IF NOT EXISTS idx_categories_ownerKey ON categories(ownerKey);`
+         );
+      },
+   },
+   {
+      version: 4,
+      up: async () => {
+         await exec(`
+         CREATE TABLE IF NOT EXISTS budgets (
+            id TEXT PRIMARY KEY,
+            categoryId TEXT NOT NULL,
+            monthKey TEXT NOT NULL,
+            amountCents INTEGER NOT NULL,
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL,
+            ownerKey TEXT NOT NULL,
+            userId TEXT
+         );
+         `);
+
+         await exec(`
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_budgets_scope_category_month
+         ON budgets(ownerKey, categoryId, monthKey);
+         `);
+
+         await exec(`
+         CREATE TABLE IF NOT EXISTS recurring_expenses (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            amountCents INTEGER NOT NULL,
+            currency TEXT NOT NULL,
+            categoryId TEXT NOT NULL,
+            description TEXT,
+            frequency TEXT NOT NULL,
+            nextDueDate TEXT NOT NULL,
+            lastGeneratedDate TEXT,
+            isActive INTEGER NOT NULL,
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL,
+            ownerKey TEXT NOT NULL,
+            userId TEXT
+         );
+         `);
+
+         await exec(`
+         CREATE INDEX IF NOT EXISTS idx_recurring_scope
+         ON recurring_expenses(ownerKey, isActive, nextDueDate);
+         `);
+      },
+   },
+   {
+      version: 5,
+      up: async () => {
+         await exec(`
+         ALTER TABLE categories ADD COLUMN budget REAL NOT NULL DEFAULT 0;
+         `);
+
+         await exec(`
+         UPDATE categories
+         SET budget = 0
+         WHERE budget IS NULL;
+         `);
       },
    },
    ];

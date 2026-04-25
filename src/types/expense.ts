@@ -23,6 +23,7 @@ export const ExpenseSchema = z.object({
    dirty: z.number(),       // 0 | 1
    version: z.number(),
    deviceId: z.string(),
+   ownerKey: z.string(),
    userId: z.string().nullable(),
 });
 

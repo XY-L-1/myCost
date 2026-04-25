@@ -1,8 +1,14 @@
 import { createContext, useContext } from "react";
 
+export type AuthEntryTarget = "entry" | "signIn" | "signUp";
+
 type AuthGateContextValue = {
   allowAnonymous: boolean;
+  authEntryTarget: AuthEntryTarget;
   continueAsGuest: () => void;
+  openAuthEntry: () => void;
+  openSignIn: () => void;
+  openSignUp: () => void;
   resetAnonymous: () => void;
 };
 

@@ -2,8 +2,11 @@ import { createContext, useContext } from "react";
 
 type SyncGateContextValue = {
   categoriesStatus: "loading" | "ready" | "error";
+  syncStatus: "idle" | "syncing" | "ready" | "error";
   categoriesRevision: number;
-  retryCategories: () => void;
+  lastSyncAt: string | null;
+  syncMessage: string | null;
+  retrySync: () => void;
 };
 
 const SyncGateContext = createContext<SyncGateContextValue | null>(null);

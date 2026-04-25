@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { runMigrations } from "../db/migration";
-import * as SecureStore from "expo-secure-store";
 import { generateUUID } from "../utils/uuid";
+import { keyValueStorage } from "../services/keyValueStorage";
 
 /**
  * AppInitState
@@ -14,6 +14,7 @@ type AppInitState = {
    ready: boolean;
    initializing: boolean;
    error: string | null;
+   deviceId: string | null;
 
    /**
       * initialize
@@ -33,11 +34,11 @@ type AppInitState = {
  * This ID is used later for sync conflict resolution.
  */
 async function getDeviceId(): Promise<string> {
-   const existing = await SecureStore.getItemAsync("deviceId");
+   const existing = await keyValueStorage.getItem("deviceId");
    if (existing) return existing;
 
    const id = await generateUUID();
-   await SecureStore.setItemAsync("deviceId", id);
+   await keyValueStorage.setItem("deviceId", id);
    return id;
 }
 
@@ -45,6 +46,7 @@ export const useAppInitStore = create<AppInitState>((set) => ({
    ready: false,
    initializing: false,
    error: null,
+   deviceId: null,
 
    initialize: async () => {
       try {
@@ -57,11 +59,11 @@ export const useAppInitStore = create<AppInitState>((set) => ({
          const deviceId = await getDeviceId();
 
          // Mark app as ready
-         set({ ready: true, initializing: false });
+         set({ ready: true, initializing: false, deviceId });
       } catch (e) {
          console.error("App initialization failed", e);
          set({
-         error: "Failed to initialize app",
+         error: "errors.initFailed",
          initializing: false,
          });
       }

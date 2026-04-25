@@ -6,6 +6,7 @@ import { z } from "zod";
 export const CategorySchema = z.object({
    id: z.string(),
    name: z.string(),
+   budget: z.number(),
    normalizedName: z.string().nullable().optional(),
    createdAt: z.string(),
    updatedAt: z.string(),
@@ -13,6 +14,7 @@ export const CategorySchema = z.object({
    dirty: z.number(),     // 0 | 1（SQLite 不支持 boolean）
    version: z.number(),
    deviceId: z.string(),
+   ownerKey: z.string(),
    userId: z.string().nullable(),
 });
 

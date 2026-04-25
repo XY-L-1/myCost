@@ -1,8 +1,14 @@
 import { query, run } from "../db/database";
 import { Category, CategorySchema } from "../types/category";
 import { Expense, ExpenseSchema } from "../types/expense";
+import { Budget, BudgetSchema } from "../types/budget";
+import {
+   RecurringExpense,
+   RecurringExpenseSchema,
+} from "../types/recurringExpense";
 import { supabase } from "../auth/supabaseClient";
 import { normalizeCategoryName } from "../utils/categoryIdentity";
+import { repointCategoryReferences } from "../services/categoryReferenceService";
 
 type RemoteExpenseRow = {
    id: string;
@@ -23,6 +29,7 @@ type RemoteCategoryRow = {
    id: string;
    user_id: string;
    name: string;
+   budget?: number | string | null;
    normalized_name?: string | null;
    created_at: string;
    updated_at: string;
@@ -34,8 +41,35 @@ type RemoteCategoryRow = {
 type RemoteCategoryNameRow = {
    id: string;
    name: string;
+   budget?: number | string | null;
    deleted_at: string | null;
    normalized_name?: string | null;
+};
+
+type RemoteBudgetRow = {
+   id: string;
+   user_id: string;
+   category_id: string;
+   month_key: string;
+   amount_cents: number;
+   created_at: string;
+   updated_at: string;
+};
+
+type RemoteRecurringExpenseRow = {
+   id: string;
+   user_id: string;
+   title: string;
+   amount_cents: number;
+   currency: string;
+   category_id: string;
+   description: string | null;
+   frequency: "weekly" | "monthly";
+   next_due_date: string;
+   last_generated_date: string | null;
+   is_active: number;
+   created_at: string;
+   updated_at: string;
 };
 
 /**
@@ -80,8 +114,8 @@ export async function pushDirtyExpenses(userId: string): Promise<void> {
 
       // Mark local record as clean
       await run(
-         `UPDATE expenses SET dirty = 0 WHERE id = ?;`,
-         [expense.id]
+         `UPDATE expenses SET dirty = 0 WHERE id = ? AND userId = ?;`,
+         [expense.id, userId]
       );
    }
 }
@@ -109,10 +143,12 @@ export async function pushDirtyCategories(userId: string): Promise<void> {
 
       const normalized =
          category.normalizedName ?? normalizeCategoryName(category.name);
-      let remoteMatch = remoteNameMap.get(normalized);
+      let remoteMatch: RemoteCategoryNameRow | undefined =
+         remoteNameMap.get(normalized);
 
       if (!remoteMatch) {
-         remoteMatch = await fetchRemoteCategoryByNormalized(userId, normalized);
+         remoteMatch =
+            (await fetchRemoteCategoryByNormalized(userId, normalized)) ?? undefined;
       }
 
       if (remoteMatch && remoteMatch.id !== category.id) {
@@ -120,7 +156,7 @@ export async function pushDirtyCategories(userId: string): Promise<void> {
          if (remoteMatch.deleted_at) {
             await reviveRemoteCategory(remoteMatch.id, category, userId);
          }
-         await mergeLocalCategoryDuplicate(category.id, remoteMatch.id);
+         await mergeLocalCategoryDuplicate(category.id, remoteMatch.id, userId);
          continue;
       }
 
@@ -128,6 +164,7 @@ export async function pushDirtyCategories(userId: string): Promise<void> {
          id: category.id,
          user_id: userId,
          name: category.name,
+         budget: category.budget,
          normalized_name: normalized,
          created_at: category.createdAt,
          updated_at: category.updatedAt,
@@ -156,14 +193,15 @@ export async function pushDirtyCategories(userId: string): Promise<void> {
                      normalized,
                   }
                );
-               await mergeLocalCategoryDuplicate(category.id, resolved.id);
+               await mergeLocalCategoryDuplicate(category.id, resolved.id, userId);
                continue;
             }
             if (resolved && resolved.id === category.id) {
                // Remote already has this category; mark clean to avoid retries.
-               await run(`UPDATE categories SET dirty = 0 WHERE id = ?;`, [
-                  category.id,
-               ]);
+               await run(
+                  `UPDATE categories SET dirty = 0 WHERE id = ? AND userId = ?;`,
+                  [category.id, userId]
+               );
                console.log(
                   "[SYNC] Marked category clean (already exists remotely)",
                   category.id
@@ -181,8 +219,8 @@ export async function pushDirtyCategories(userId: string): Promise<void> {
                   await run(
                      `UPDATE categories
                       SET deletedAt = NULL, updatedAt = ?, dirty = 1, version = version + 1
-                      WHERE id = ?;`,
-                     [new Date().toISOString(), localCanonical.id]
+                      WHERE id = ? AND ownerKey = ?;`,
+                     [new Date().toISOString(), localCanonical.id, userId]
                   );
                }
                console.log("[SYNC] Merging duplicate into local canonical", {
@@ -190,13 +228,18 @@ export async function pushDirtyCategories(userId: string): Promise<void> {
                   canonicalId: localCanonical.id,
                   normalized,
                });
-               await mergeLocalCategoryDuplicate(category.id, localCanonical.id);
+               await mergeLocalCategoryDuplicate(
+                  category.id,
+                  localCanonical.id,
+                  userId
+               );
                continue;
             }
             // Last resort: stop retrying this row to avoid infinite loops.
-            await run(`UPDATE categories SET dirty = 0 WHERE id = ?;`, [
-               category.id,
-            ]);
+            await run(
+               `UPDATE categories SET dirty = 0 WHERE id = ? AND userId = ?;`,
+               [category.id, userId]
+            );
             console.warn(
                "[SYNC] Cleared dirty flag to avoid retry loop",
                category.id
@@ -207,8 +250,9 @@ export async function pushDirtyCategories(userId: string): Promise<void> {
          throw error;
       }
 
-      await run(`UPDATE categories SET dirty = 0 WHERE id = ?;`, [
+      await run(`UPDATE categories SET dirty = 0 WHERE id = ? AND userId = ?;`, [
          category.id,
+         userId,
       ]);
    }
 }
@@ -272,7 +316,7 @@ export async function pullRemoteCategories(userId: string): Promise<void> {
       const { data, error } = await supabase
          .from("categories")
          .select(
-            "id,user_id,name,normalized_name,created_at,updated_at,deleted_at,version,device_id"
+            "id,user_id,name,budget,normalized_name,created_at,updated_at,deleted_at,version,device_id"
          )
          .eq("user_id", userId)
          .range(from, to);
@@ -299,6 +343,177 @@ export async function pullRemoteCategories(userId: string): Promise<void> {
    await applyRemoteCategoryChanges(userId, remoteRows);
 }
 
+export async function pullRemoteBudgets(userId: string): Promise<void> {
+   const pageSize = 500;
+   let from = 0;
+   let to = pageSize - 1;
+   const remoteRows: RemoteBudgetRow[] = [];
+
+   while (true) {
+      const { data, error } = await supabase
+         .from("budgets")
+         .select(
+            "id,user_id,category_id,month_key,amount_cents,created_at,updated_at"
+         )
+         .eq("user_id", userId)
+         .range(from, to);
+
+      if (error) {
+         console.error("[SYNC] Failed to pull budgets", error);
+         throw error;
+      }
+
+      if (!data || data.length === 0) break;
+
+      remoteRows.push(...(data as RemoteBudgetRow[]));
+      if (data.length < pageSize) break;
+
+      from += pageSize;
+      to += pageSize;
+   }
+
+   await applyRemoteBudgetChanges(userId, remoteRows);
+}
+
+export async function pushLocalBudgets(userId: string): Promise<void> {
+   const localBudgets = await query<Budget>(
+      `SELECT * FROM budgets WHERE userId = ?;`,
+      [userId]
+   );
+
+   if (localBudgets.length === 0) return;
+
+   const remoteMap = await fetchRemoteBudgetMap(userId);
+
+   for (const budget of localBudgets) {
+      const key = budgetKey(budget.categoryId, budget.monthKey);
+      const remote = remoteMap.get(key);
+
+      if (remote) {
+         const localUpdated = new Date(budget.updatedAt).getTime();
+         const remoteUpdated = new Date(remote.updated_at).getTime();
+         if (localUpdated <= remoteUpdated) {
+            continue;
+         }
+
+         const { error } = await supabase
+            .from("budgets")
+            .update({
+               amount_cents: budget.amountCents,
+               updated_at: budget.updatedAt,
+            })
+            .eq("id", remote.id)
+            .eq("user_id", userId);
+
+         if (error) {
+            console.error("[SYNC] Failed to update budget", budget.id, error);
+            throw error;
+         }
+         continue;
+      }
+
+      const { error } = await supabase.from("budgets").insert({
+         id: budget.id,
+         user_id: userId,
+         category_id: budget.categoryId,
+         month_key: budget.monthKey,
+         amount_cents: budget.amountCents,
+         created_at: budget.createdAt,
+         updated_at: budget.updatedAt,
+      });
+
+      if (error) {
+         console.error("[SYNC] Failed to insert budget", budget.id, error);
+         throw error;
+      }
+   }
+}
+
+export async function pullRemoteRecurringExpenses(userId: string): Promise<void> {
+   const pageSize = 500;
+   let from = 0;
+   let to = pageSize - 1;
+   const remoteRows: RemoteRecurringExpenseRow[] = [];
+
+   while (true) {
+      const { data, error } = await supabase
+         .from("recurring_expenses")
+         .select(
+            "id,user_id,title,amount_cents,currency,category_id,description,frequency,next_due_date,last_generated_date,is_active,created_at,updated_at"
+         )
+         .eq("user_id", userId)
+         .range(from, to);
+
+      if (error) {
+         console.error("[SYNC] Failed to pull recurring expenses", error);
+         throw error;
+      }
+
+      if (!data || data.length === 0) break;
+
+      remoteRows.push(...(data as RemoteRecurringExpenseRow[]));
+      if (data.length < pageSize) break;
+
+      from += pageSize;
+      to += pageSize;
+   }
+
+   await applyRemoteRecurringExpenseChanges(userId, remoteRows);
+}
+
+export async function pushLocalRecurringExpenses(userId: string): Promise<void> {
+   const localItems = await query<RecurringExpense>(
+      `SELECT * FROM recurring_expenses WHERE userId = ?;`,
+      [userId]
+   );
+
+   if (localItems.length === 0) return;
+
+   const remoteMap = await fetchRemoteRecurringExpenseMap(userId);
+
+   for (const item of localItems) {
+      const remote = remoteMap.get(item.id);
+      const payload = mapLocalRecurringExpenseToRemote(item, userId);
+
+      if (remote) {
+         const localUpdated = new Date(item.updatedAt).getTime();
+         const remoteUpdated = new Date(remote.updated_at).getTime();
+         if (localUpdated <= remoteUpdated) {
+            continue;
+         }
+
+         const { error } = await supabase
+            .from("recurring_expenses")
+            .update(payload)
+            .eq("id", item.id)
+            .eq("user_id", userId);
+
+         if (error) {
+            console.error(
+               "[SYNC] Failed to update recurring expense",
+               item.id,
+               error
+            );
+            throw error;
+         }
+         continue;
+      }
+
+      const { error } = await supabase
+         .from("recurring_expenses")
+         .insert({ id: item.id, ...payload });
+
+      if (error) {
+         console.error(
+            "[SYNC] Failed to insert recurring expense",
+            item.id,
+            error
+         );
+         throw error;
+      }
+   }
+}
+
 /**
  * applyRemoteChanges
  *
@@ -320,8 +535,8 @@ export async function applyRemoteChanges(
       const remote = mapRemoteExpense(row);
 
       const localRows = await query<Expense>(
-         `SELECT * FROM expenses WHERE id = ?;`,
-         [remote.id]
+         `SELECT * FROM expenses WHERE id = ? AND ownerKey = ?;`,
+         [remote.id, userId]
       );
 
       if (localRows.length === 0) {
@@ -355,8 +570,8 @@ export async function applyRemoteCategoryChanges(
       const remote = mapRemoteCategory(row);
 
       const localRows = await query<Category>(
-         `SELECT * FROM categories WHERE id = ?;`,
-         [remote.id]
+         `SELECT * FROM categories WHERE id = ? AND ownerKey = ?;`,
+         [remote.id, userId]
       );
 
       if (localRows.length === 0) {
@@ -373,10 +588,63 @@ export async function applyRemoteCategoryChanges(
    }
 }
 
+async function applyRemoteBudgetChanges(
+   userId: string,
+   remoteRows: RemoteBudgetRow[]
+): Promise<void> {
+   for (const row of remoteRows) {
+      if (row.user_id !== userId) continue;
+
+      const remote = mapRemoteBudget(row);
+      const local = await findLocalBudgetByIdOrKey(userId, remote);
+
+      if (!local) {
+         await insertLocalBudget(remote);
+         continue;
+      }
+
+      const localUpdated = new Date(local.updatedAt).getTime();
+      const remoteUpdated = new Date(remote.updatedAt).getTime();
+
+      if (remoteUpdated > localUpdated) {
+         await updateLocalBudget(local.id, remote);
+      }
+   }
+}
+
+async function applyRemoteRecurringExpenseChanges(
+   userId: string,
+   remoteRows: RemoteRecurringExpenseRow[]
+): Promise<void> {
+   for (const row of remoteRows) {
+      if (row.user_id !== userId) continue;
+
+      const remote = mapRemoteRecurringExpense(row);
+      const localRows = await query<RecurringExpense>(
+         `SELECT * FROM recurring_expenses WHERE id = ? AND ownerKey = ?;`,
+         [remote.id, userId]
+      );
+
+      if (localRows.length === 0) {
+         await insertLocalRecurringExpense(remote);
+         continue;
+      }
+
+      const local = RecurringExpenseSchema.parse(localRows[0]);
+      const localUpdated = new Date(local.updatedAt).getTime();
+      const remoteUpdated = new Date(remote.updatedAt).getTime();
+
+      if (remoteUpdated > localUpdated) {
+         await updateLocalRecurringExpense(remote);
+      }
+   }
+}
+
 function mapRemoteExpense(row: RemoteExpenseRow): Expense {
    return {
       id: row.id,
       userId: row.user_id,
+      ownerKey: row.user_id,
       amountCents: row.amount_cents,
       currency: row.currency,
       categoryId: row.category_id,
@@ -419,7 +687,9 @@ function mapRemoteCategory(row: RemoteCategoryRow): Category {
    return {
       id: row.id,
       userId: row.user_id,
+      ownerKey: row.user_id,
       name: row.name,
+      budget: Number(row.budget ?? 0),
       normalizedName: normalized,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -427,6 +697,60 @@ function mapRemoteCategory(row: RemoteCategoryRow): Category {
       dirty: 0,
       version: row.version,
       deviceId: row.device_id,
+   };
+}
+
+function mapRemoteBudget(row: RemoteBudgetRow): Budget {
+   return {
+      id: row.id,
+      userId: row.user_id,
+      ownerKey: row.user_id,
+      categoryId: row.category_id,
+      monthKey: row.month_key,
+      amountCents: row.amount_cents,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+   };
+}
+
+function mapRemoteRecurringExpense(
+   row: RemoteRecurringExpenseRow
+): RecurringExpense {
+   return {
+      id: row.id,
+      userId: row.user_id,
+      ownerKey: row.user_id,
+      title: row.title,
+      amountCents: row.amount_cents,
+      currency: row.currency,
+      categoryId: row.category_id,
+      description: row.description,
+      frequency: row.frequency,
+      nextDueDate: row.next_due_date,
+      lastGeneratedDate: row.last_generated_date,
+      isActive: row.is_active,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+   };
+}
+
+function mapLocalRecurringExpenseToRemote(
+   item: RecurringExpense,
+   userId: string
+) {
+   return {
+      user_id: userId,
+      title: item.title,
+      amount_cents: item.amountCents,
+      currency: item.currency,
+      category_id: item.categoryId,
+      description: item.description,
+      frequency: item.frequency,
+      next_due_date: item.nextDueDate,
+      last_generated_date: item.lastGeneratedDate,
+      is_active: item.isActive,
+      created_at: item.createdAt,
+      updated_at: item.updatedAt,
    };
 }
 
@@ -458,13 +782,14 @@ async function insertLocalCategory(category: Category): Promise<void> {
    await run(
       `
       INSERT INTO categories (
-         id, name, normalizedName, createdAt, updatedAt, deletedAt,
-         dirty, version, deviceId, userId
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+         id, name, budget, normalizedName, createdAt, updatedAt, deletedAt,
+         dirty, version, deviceId, ownerKey, userId
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
       `,
       [
          category.id,
          category.name,
+         category.budget,
          normalizedName,
          category.createdAt,
          category.updatedAt,
@@ -472,6 +797,7 @@ async function insertLocalCategory(category: Category): Promise<void> {
          0,
          category.version,
          category.deviceId,
+         category.ownerKey,
          category.userId,
       ]
    );
@@ -484,6 +810,7 @@ async function updateLocalCategory(category: Category): Promise<void> {
       `
       UPDATE categories SET
          name = ?,
+         budget = ?,
          normalizedName = ?,
          createdAt = ?,
          updatedAt = ?,
@@ -491,11 +818,13 @@ async function updateLocalCategory(category: Category): Promise<void> {
          dirty = ?,
          version = ?,
          deviceId = ?,
+         ownerKey = ?,
          userId = ?
-      WHERE id = ?;
+      WHERE id = ? AND ownerKey = ?;
       `,
       [
          category.name,
+         category.budget,
          normalizedName,
          category.createdAt,
          category.updatedAt,
@@ -503,8 +832,10 @@ async function updateLocalCategory(category: Category): Promise<void> {
          0,
          category.version,
          category.deviceId,
+         category.ownerKey,
          category.userId,
          category.id,
+         category.ownerKey,
       ]
    );
 }
@@ -520,7 +851,7 @@ async function fetchRemoteCategoryNameMap(
    while (true) {
       const { data, error } = await supabase
          .from("categories")
-         .select("id,name,deleted_at,normalized_name")
+         .select("id,name,budget,deleted_at,normalized_name")
          .eq("user_id", userId)
          .range(from, to);
 
@@ -554,7 +885,7 @@ async function fetchRemoteCategoryByNormalized(
 ): Promise<RemoteCategoryNameRow | null> {
    const { data, error } = await supabase
       .from("categories")
-      .select("id,name,deleted_at,normalized_name")
+      .select("id,name,budget,deleted_at,normalized_name")
       .eq("user_id", userId)
       .eq("normalized_name", normalized)
       .limit(1);
@@ -574,7 +905,7 @@ async function findLocalCategoryByNormalized(
    excludeId: string
 ): Promise<Category | null> {
    const rows = await query<Category>(
-      `SELECT * FROM categories WHERE userId = ?;`,
+      `SELECT * FROM categories WHERE ownerKey = ?;`,
       [userId]
    );
 
@@ -600,28 +931,198 @@ async function findLocalCategoryByNormalized(
    return matches[0];
 }
 
+function budgetKey(categoryId: string, monthKey: string) {
+   return `${categoryId}:${monthKey}`;
+}
+
+async function fetchRemoteBudgetMap(
+   userId: string
+): Promise<Map<string, RemoteBudgetRow>> {
+   const { data, error } = await supabase
+      .from("budgets")
+      .select("id,user_id,category_id,month_key,amount_cents,created_at,updated_at")
+      .eq("user_id", userId);
+
+   if (error) {
+      console.error("[SYNC] Failed to fetch budget keys", error);
+      throw error;
+   }
+
+   const map = new Map<string, RemoteBudgetRow>();
+   (data as RemoteBudgetRow[] | null)?.forEach((row) => {
+      map.set(budgetKey(row.category_id, row.month_key), row);
+   });
+   return map;
+}
+
+async function fetchRemoteRecurringExpenseMap(
+   userId: string
+): Promise<Map<string, RemoteRecurringExpenseRow>> {
+   const { data, error } = await supabase
+      .from("recurring_expenses")
+      .select(
+         "id,user_id,title,amount_cents,currency,category_id,description,frequency,next_due_date,last_generated_date,is_active,created_at,updated_at"
+      )
+      .eq("user_id", userId);
+
+   if (error) {
+      console.error("[SYNC] Failed to fetch recurring expenses", error);
+      throw error;
+   }
+
+   const map = new Map<string, RemoteRecurringExpenseRow>();
+   (data as RemoteRecurringExpenseRow[] | null)?.forEach((row) => {
+      map.set(row.id, row);
+   });
+   return map;
+}
+
+async function findLocalBudgetByIdOrKey(
+   userId: string,
+   budget: Budget
+): Promise<Budget | null> {
+   const rows = await query<Budget>(
+      `
+      SELECT *
+      FROM budgets
+      WHERE ownerKey = ?
+        AND (
+          id = ?
+          OR (categoryId = ? AND monthKey = ?)
+        )
+      ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END
+      LIMIT 1;
+      `,
+      [userId, budget.id, budget.categoryId, budget.monthKey, budget.id]
+   );
+
+   return rows[0] ? BudgetSchema.parse(rows[0]) : null;
+}
+
+async function insertLocalBudget(budget: Budget): Promise<void> {
+   await run(
+      `
+      INSERT INTO budgets (
+         id, categoryId, monthKey, amountCents, createdAt, updatedAt, ownerKey, userId
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+      `,
+      [
+         budget.id,
+         budget.categoryId,
+         budget.monthKey,
+         budget.amountCents,
+         budget.createdAt,
+         budget.updatedAt,
+         budget.ownerKey,
+         budget.userId,
+      ]
+   );
+}
+
+async function updateLocalBudget(
+   localId: string,
+   budget: Budget
+): Promise<void> {
+   await run(
+      `
+      UPDATE budgets
+      SET categoryId = ?, monthKey = ?, amountCents = ?, createdAt = ?, updatedAt = ?, ownerKey = ?, userId = ?
+      WHERE id = ?
+        AND ownerKey = ?;
+      `,
+      [
+         budget.categoryId,
+         budget.monthKey,
+         budget.amountCents,
+         budget.createdAt,
+         budget.updatedAt,
+         budget.ownerKey,
+         budget.userId,
+         localId,
+         budget.ownerKey,
+      ]
+   );
+}
+
+async function insertLocalRecurringExpense(
+   item: RecurringExpense
+): Promise<void> {
+   await run(
+      `
+      INSERT INTO recurring_expenses (
+         id, title, amountCents, currency, categoryId, description,
+         frequency, nextDueDate, lastGeneratedDate, isActive,
+         createdAt, updatedAt, ownerKey, userId
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+      `,
+      [
+         item.id,
+         item.title,
+         item.amountCents,
+         item.currency,
+         item.categoryId,
+         item.description,
+         item.frequency,
+         item.nextDueDate,
+         item.lastGeneratedDate,
+         item.isActive,
+         item.createdAt,
+         item.updatedAt,
+         item.ownerKey,
+         item.userId,
+      ]
+   );
+}
+
+async function updateLocalRecurringExpense(
+   item: RecurringExpense
+): Promise<void> {
+   await run(
+      `
+      UPDATE recurring_expenses
+      SET title = ?, amountCents = ?, currency = ?, categoryId = ?, description = ?,
+          frequency = ?, nextDueDate = ?, lastGeneratedDate = ?, isActive = ?,
+          createdAt = ?, updatedAt = ?, ownerKey = ?, userId = ?
+      WHERE id = ?
+        AND ownerKey = ?;
+      `,
+      [
+         item.title,
+         item.amountCents,
+         item.currency,
+         item.categoryId,
+         item.description,
+         item.frequency,
+         item.nextDueDate,
+         item.lastGeneratedDate,
+         item.isActive,
+         item.createdAt,
+         item.updatedAt,
+         item.ownerKey,
+         item.userId,
+         item.id,
+         item.ownerKey,
+      ]
+   );
+}
+
 async function mergeLocalCategoryDuplicate(
    duplicateId: string,
-   canonicalId: string
+   canonicalId: string,
+   userId: string
 ): Promise<void> {
    const now = new Date().toISOString();
 
-   await run(
-      `
-      UPDATE expenses
-      SET categoryId = ?, updatedAt = ?, dirty = 1, version = version + 1
-      WHERE categoryId = ?;
-      `,
-      [canonicalId, now, duplicateId]
-   );
+   await repointCategoryReferences(userId, [duplicateId], canonicalId, now);
 
    await run(
       `
       UPDATE categories
       SET deletedAt = ?, updatedAt = ?, dirty = 0, version = version + 1
-      WHERE id = ?;
+      WHERE id = ?
+        AND ownerKey = ?;
       `,
-      [now, now, duplicateId]
+      [now, now, duplicateId, userId]
    );
 }
 
@@ -632,21 +1133,22 @@ async function reviveRemoteCategory(
 ): Promise<void> {
    const now = new Date().toISOString();
    const rows = await query<Category>(
-      `SELECT * FROM categories WHERE id = ?;`,
-      [canonicalId]
+      `SELECT * FROM categories WHERE id = ? AND ownerKey = ?;`,
+      [canonicalId, userId]
    );
 
    if (rows.length === 0) {
       await run(
          `
          INSERT INTO categories (
-            id, name, normalizedName, createdAt, updatedAt, deletedAt,
-            dirty, version, deviceId, userId
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            id, name, budget, normalizedName, createdAt, updatedAt, deletedAt,
+            dirty, version, deviceId, ownerKey, userId
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
          `,
          [
             canonicalId,
             source.name,
+            source.budget,
             normalizeCategoryName(source.name),
             source.createdAt,
             now,
@@ -654,6 +1156,7 @@ async function reviveRemoteCategory(
             1,
             source.version + 1,
             source.deviceId,
+            userId,
             userId,
          ]
       );
@@ -666,10 +1169,18 @@ async function reviveRemoteCategory(
    await run(
       `
       UPDATE categories
-      SET name = ?, normalizedName = ?, updatedAt = ?, deletedAt = NULL, dirty = 1, version = ?
-      WHERE id = ?;
+      SET name = ?, budget = ?, normalizedName = ?, updatedAt = ?, deletedAt = NULL, dirty = 1, version = ?
+      WHERE id = ? AND ownerKey = ?;
       `,
-      [source.name, normalizeCategoryName(source.name), now, nextVersion, canonicalId]
+      [
+         source.name,
+         source.budget,
+         normalizeCategoryName(source.name),
+         now,
+         nextVersion,
+         canonicalId,
+         userId,
+      ]
    );
 }
 
@@ -679,8 +1190,8 @@ async function insertLocalExpense(expense: Expense): Promise<void> {
       INSERT INTO expenses (
          id, amountCents, currency, categoryId, description,
          expenseDate, createdAt, updatedAt, deletedAt,
-         dirty, version, deviceId, userId
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+         dirty, version, deviceId, ownerKey, userId
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
       `,
       [
          expense.id,
@@ -695,6 +1206,7 @@ async function insertLocalExpense(expense: Expense): Promise<void> {
          0,
          expense.version,
          expense.deviceId,
+         expense.ownerKey,
          expense.userId,
       ]
    );
@@ -715,8 +1227,9 @@ async function updateLocalExpense(expense: Expense): Promise<void> {
          dirty = ?,
          version = ?,
          deviceId = ?,
+         ownerKey = ?,
          userId = ?
-      WHERE id = ?;
+      WHERE id = ? AND ownerKey = ?;
       `,
       [
          expense.amountCents,
@@ -730,8 +1243,10 @@ async function updateLocalExpense(expense: Expense): Promise<void> {
          0,
          expense.version,
          expense.deviceId,
+         expense.ownerKey,
          expense.userId,
          expense.id,
+         expense.ownerKey,
       ]
    );
 }

@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "outDir": ".test-dist",
+    "rootDir": "."
+  },
+  "include": [
+    "src/domain/budgetMerge.ts",
+    "src/domain/dataScope.ts",
+    "src/domain/expenseMutations.ts",
+    "src/utils/date.ts",
+    "src/types/expense.ts"
+  ]
+}

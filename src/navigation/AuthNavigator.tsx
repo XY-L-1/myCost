@@ -14,9 +14,14 @@ const Stack = createNativeStackNavigator<AuthStackParamList>();
 
 const FONT_BODY = Platform.select({ ios: "Avenir Next", android: "serif" });
 
-export function AuthNavigator() {
+export function AuthNavigator({
+  initialRouteName = "AuthEntry",
+}: {
+  initialRouteName?: keyof AuthStackParamList;
+}) {
   return (
     <Stack.Navigator
+      initialRouteName={initialRouteName}
       screenOptions={{
         headerShown: false,
         headerTitleStyle: { fontFamily: FONT_BODY },

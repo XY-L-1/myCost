@@ -26,7 +26,14 @@
       "package": "com.anonymous.mycost"
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/favicon.png",
+      "name": "MyCost",
+      "shortName": "MyCost",
+      "themeColor": "#1F6A53",
+      "backgroundColor": "#F3F1EC",
+      "display": "standalone"
     },
     "plugins": [
       "expo-sqlite",

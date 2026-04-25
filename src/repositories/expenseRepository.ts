@@ -1,161 +1,204 @@
-import { exec, query, run } from "../db/database";
+import { query, queryFirst, run } from "../db/database";
+import { DataScope, buildScopeFilter } from "../domain/dataScope";
+import { buildSoftDeletedExpense } from "../domain/expenseMutations";
 import { Expense, ExpenseSchema } from "../types/expense";
 import { notifyExpenseMutation } from "../sync/syncEvents";
 
-/**
- * ExpenseRepository
- *
- * Handles all local SQLite access for expenses.
- * This layer contains NO business logic and NO sync logic.
- */
+type ExpenseListOptions = {
+  monthKey?: string;
+  categoryId?: string;
+  search?: string;
+  limit?: number;
+};
+
 export class ExpenseRepository {
-   /**
-      * Insert a new expense into SQLite.
-      */
-   static async create(expense: Expense): Promise<void> {
-      await run(
-         `
-         INSERT INTO expenses (
-         id, amountCents, currency, categoryId, description,
-         expenseDate, createdAt, updatedAt, deletedAt,
-         dirty, version, deviceId, userId
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-         `,
-         [
-         expense.id,
-         expense.amountCents,
-         expense.currency,
-         expense.categoryId,
-         expense.description,
-         expense.expenseDate,
-         expense.createdAt,
-         expense.updatedAt,
-         expense.deletedAt,
-         expense.dirty,
-         expense.version,
-         expense.deviceId,
-         expense.userId,
-         ]
-      );
+  static async create(expense: Expense): Promise<void> {
+    await run(
+      `
+      INSERT INTO expenses (
+        id, amountCents, currency, categoryId, description,
+        expenseDate, createdAt, updatedAt, deletedAt,
+        dirty, version, deviceId, ownerKey, userId
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+      `,
+      [
+        expense.id,
+        expense.amountCents,
+        expense.currency,
+        expense.categoryId,
+        expense.description,
+        expense.expenseDate,
+        expense.createdAt,
+        expense.updatedAt,
+        expense.deletedAt,
+        expense.dirty,
+        expense.version,
+        expense.deviceId,
+        expense.ownerKey,
+        expense.userId,
+      ]
+    );
 
-      // Notify sync layer without coupling UI to network logic.
-      notifyExpenseMutation();
-   }
+    notifyExpenseMutation();
+  }
 
-   /**
-      * Update an existing expense.
-      * Marks the record as dirty for future sync.
-      */
-   static async update(expense: Expense): Promise<void> {
-      await run(
-         `
-         UPDATE expenses SET
-         amountCents = ?,
-         currency = ?,
-         categoryId = ?,
-         description = ?,
-         expenseDate = ?,
-         updatedAt = ?,
-         dirty = ?,
-         version = ?
-         WHERE id = ?;
-         `,
-         [
-         expense.amountCents,
-         expense.currency,
-         expense.categoryId,
-         expense.description,
-         expense.expenseDate,
-         expense.updatedAt,
-         expense.dirty,
-         expense.version,
-         expense.id,
-         ]
-      );
+  static async update(expense: Expense): Promise<void> {
+    await run(
+      `
+      UPDATE expenses SET
+        amountCents = ?,
+        currency = ?,
+        categoryId = ?,
+        description = ?,
+        expenseDate = ?,
+        updatedAt = ?,
+        dirty = ?,
+        version = ?
+      WHERE id = ? AND ownerKey = ?;
+      `,
+      [
+        expense.amountCents,
+        expense.currency,
+        expense.categoryId,
+        expense.description,
+        expense.expenseDate,
+        expense.updatedAt,
+        expense.dirty,
+        expense.version,
+        expense.id,
+        expense.ownerKey,
+      ]
+    );
 
-      // Notify sync layer without coupling UI to network logic.
-      notifyExpenseMutation();
-   }
+    notifyExpenseMutation();
+  }
 
-   /**
-      * Soft delete an expense using deletedAt (tombstone).
-      */
-   static async softDelete(id: string, deletedAt: string): Promise<void> {
-      await run(
-         `
-         UPDATE expenses
-         SET deletedAt = ?, dirty = 1
-         WHERE id = ?;
-         `,
-         [deletedAt, id]
-      );
+  static async softDelete(expense: Expense, deletedAt: string): Promise<void> {
+    const nextExpense = buildSoftDeletedExpense(expense, deletedAt);
+    await run(
+      `
+      UPDATE expenses
+      SET deletedAt = ?, updatedAt = ?, dirty = 1, version = ?
+      WHERE id = ? AND ownerKey = ?;
+      `,
+      [
+        nextExpense.deletedAt,
+        nextExpense.updatedAt,
+        nextExpense.version,
+        nextExpense.id,
+        nextExpense.ownerKey,
+      ]
+    );
 
-      // Notify sync layer without coupling UI to network logic.
-      notifyExpenseMutation();
-   }
+    notifyExpenseMutation();
+  }
 
-   /**
-      * Get all expenses for a given month.
-      */
-   static async getByMonth(year: number, month: number): Promise<Expense[]> {
-      const monthStr = `${year}-${String(month).padStart(2, "0")}`;
+  static async getByIdInScope(
+    scope: DataScope,
+    id: string
+  ): Promise<Expense | null> {
+    const owner = buildScopeFilter(scope);
+    const row = await queryFirst<Expense>(
+      `
+      SELECT *
+      FROM expenses
+      WHERE id = ?
+        AND ${owner.clause};
+      `,
+      [id, ...owner.params]
+    );
+    return row ? ExpenseSchema.parse(row) : null;
+  }
 
-      const rows = await query<Expense>(
-         `
-         SELECT *
-         FROM expenses
-         WHERE deletedAt IS NULL
-         AND expenseDate LIKE ? || '%'
-         ORDER BY expenseDate DESC;
-         `,
-         [monthStr]
-      );
+  static async list(
+    scope: DataScope,
+    options: ExpenseListOptions = {}
+  ): Promise<Expense[]> {
+    const owner = buildScopeFilter(scope);
+    const clauses = [`${owner.clause}`, `deletedAt IS NULL`];
+    const params: Array<string | number> = [...owner.params];
 
-      return rows.map((row) => ExpenseSchema.parse(row));
-   }
+    if (options.monthKey) {
+      clauses.push(`expenseDate LIKE ? || '%'`);
+      params.push(options.monthKey);
+    }
 
-   /**
-    * Get total spending for a given month.
-    */
-   static async getMonthlyTotal(
-      year: number,
-      month: number
-   ): Promise<number> {
-   const monthStr = `${year}-${String(month).padStart(2, "0")}`;
+    if (options.categoryId) {
+      clauses.push(`categoryId = ?`);
+      params.push(options.categoryId);
+    }
 
-   const rows = await query<{ total: number }>(
+    if (options.search?.trim()) {
+      clauses.push(`LOWER(COALESCE(description, '')) LIKE ?`);
+      params.push(`%${options.search.trim().toLowerCase()}%`);
+    }
+
+    const limitClause = options.limit ? `LIMIT ${options.limit}` : "";
+    const rows = await query<Expense>(
+      `
+      SELECT *
+      FROM expenses
+      WHERE ${clauses.join(" AND ")}
+      ORDER BY expenseDate DESC, createdAt DESC
+      ${limitClause};
+      `,
+      params
+    );
+
+    return rows.map((row) => ExpenseSchema.parse(row));
+  }
+
+  static async getMonthlyTotal(
+    scope: DataScope,
+    monthKey: string
+  ): Promise<number> {
+    const owner = buildScopeFilter(scope);
+    const rows = await query<{ total: number | null }>(
       `
       SELECT SUM(amountCents) as total
       FROM expenses
-      WHERE deletedAt IS NULL
-         AND expenseDate LIKE ? || '%';
+      WHERE ${owner.clause}
+        AND deletedAt IS NULL
+        AND expenseDate LIKE ? || '%';
       `,
-      [monthStr]
-   );
+      [...owner.params, monthKey]
+    );
 
-   return rows[0]?.total ?? 0;
-   }
+    return rows[0]?.total ?? 0;
+  }
 
-
-   /**
-    * Get spending breakdown by category for a given month.
-    */
-   static async getMonthlyCategoryBreakdown(
-      year: number,
-      month: number
-   ): Promise<{ categoryId: string; total: number }[]> {
-   const monthStr = `${year}-${String(month).padStart(2, "0")}`;
-
-   return query(
+  static async getMonthlyCategoryBreakdown(
+    scope: DataScope,
+    monthKey: string
+  ): Promise<{ categoryId: string; total: number }[]> {
+    const owner = buildScopeFilter(scope);
+    return query<{ categoryId: string; total: number }>(
       `
       SELECT categoryId, SUM(amountCents) as total
       FROM expenses
-      WHERE deletedAt IS NULL
-         AND expenseDate LIKE ? || '%'
-      GROUP BY categoryId;
+      WHERE ${owner.clause}
+        AND deletedAt IS NULL
+        AND expenseDate LIKE ? || '%'
+      GROUP BY categoryId
+      ORDER BY total DESC;
       `,
-      [monthStr]
-   );
-   }
-   
+      [...owner.params, monthKey]
+    );
+  }
+
+  static async getAvailableMonthKeys(scope: DataScope): Promise<string[]> {
+    const owner = buildScopeFilter(scope);
+    const rows = await query<{ monthKey: string }>(
+      `
+      SELECT DISTINCT substr(expenseDate, 1, 7) as monthKey
+      FROM expenses
+      WHERE ${owner.clause}
+        AND deletedAt IS NULL
+      ORDER BY monthKey DESC;
+      `,
+      owner.params
+    );
+
+    return rows.map((row) => row.monthKey);
+  }
 }
