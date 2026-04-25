@@ -349,6 +349,36 @@ export async function repairMissingCategoryRefs(
   await repointCategoryReferences(ownerKey, missingIds, fallbackId, now);
 }
 
+/**
+ * repairAmbiguousCategoryRefs
+ *
+ * Some legacy local caches can have real expenses attached to a placeholder
+ * category named "Category". Split those rows back into default categories
+ * when the description gives us a strong signal.
+ */
+export async function repairAmbiguousCategoryRefs(
+  scope: DataScope,
+  deviceId: string
+): Promise<void> {
+  const ownerKey = scope.ownerKey;
+  const ambiguousCategories = await query<{ id: string }>(
+    `
+    SELECT id
+    FROM categories
+    WHERE ownerKey = ?
+      AND LOWER(TRIM(name)) = ?;
+    `,
+    [ownerKey, "category"]
+  );
+
+  if (ambiguousCategories.length === 0) return;
+
+  const ambiguousIds = ambiguousCategories.map((category) => category.id);
+  await repairAmbiguousExpenseCategoryRefs(scope, deviceId, ambiguousIds);
+  await repairAmbiguousRecurringCategoryRefs(scope, deviceId, ambiguousIds);
+  await repairAmbiguousBudgets(scope, deviceId, ambiguousIds);
+}
+
 async function repairMissingExpenseCategoryRefs(
   scope: DataScope,
   deviceId: string,
@@ -379,6 +409,50 @@ async function repairMissingExpenseCategoryRefs(
     if (!inferredName) continue;
 
     const categoryId = await ensureRepairCategory(scope, deviceId, inferredName, now);
+    await run(
+      `
+      UPDATE expenses
+      SET categoryId = ?, updatedAt = ?, dirty = 1, version = version + 1
+      WHERE ownerKey = ?
+        AND id = ?;
+      `,
+      [categoryId, now, ownerKey, row.id]
+    );
+  }
+}
+
+async function repairAmbiguousExpenseCategoryRefs(
+  scope: DataScope,
+  deviceId: string,
+  ambiguousIds: string[]
+): Promise<void> {
+  const ownerKey = scope.ownerKey;
+  const placeholders = ambiguousIds.map(() => "?").join(",");
+  const rows = await query<{
+    id: string;
+    categoryId: string;
+    amountCents: number;
+    description: string | null;
+  }>(
+    `
+    SELECT id, categoryId, amountCents, description
+    FROM expenses
+    WHERE ownerKey = ?
+      AND deletedAt IS NULL
+      AND categoryId IN (${placeholders});
+    `,
+    [ownerKey, ...ambiguousIds]
+  );
+
+  const now = new Date().toISOString();
+
+  for (const row of rows) {
+    const inferredName = inferDefaultCategoryName(row.description);
+    if (!inferredName) continue;
+
+    const categoryId = await ensureRepairCategory(scope, deviceId, inferredName, now);
+    if (categoryId === row.categoryId) continue;
+
     await run(
       `
       UPDATE expenses
@@ -434,6 +508,134 @@ async function repairMissingRecurringCategoryRefs(
       [categoryId, now, ownerKey, row.id]
     );
   }
+}
+
+async function repairAmbiguousRecurringCategoryRefs(
+  scope: DataScope,
+  deviceId: string,
+  ambiguousIds: string[]
+): Promise<void> {
+  const ownerKey = scope.ownerKey;
+  const placeholders = ambiguousIds.map(() => "?").join(",");
+  const rows = await query<{
+    id: string;
+    categoryId: string;
+    description: string | null;
+    title: string;
+  }>(
+    `
+    SELECT id, categoryId, description, title
+    FROM recurring_expenses
+    WHERE ownerKey = ?
+      AND categoryId IN (${placeholders});
+    `,
+    [ownerKey, ...ambiguousIds]
+  );
+
+  const now = new Date().toISOString();
+
+  for (const row of rows) {
+    const inferredName = inferDefaultCategoryName(
+      `${row.title} ${row.description ?? ""}`
+    );
+    if (!inferredName) continue;
+
+    const categoryId = await ensureRepairCategory(scope, deviceId, inferredName, now);
+    if (categoryId === row.categoryId) continue;
+
+    await run(
+      `
+      UPDATE recurring_expenses
+      SET categoryId = ?, updatedAt = ?
+      WHERE ownerKey = ?
+        AND id = ?;
+      `,
+      [categoryId, now, ownerKey, row.id]
+    );
+  }
+}
+
+async function repairAmbiguousBudgets(
+  scope: DataScope,
+  deviceId: string,
+  ambiguousIds: string[]
+): Promise<void> {
+  const ownerKey = scope.ownerKey;
+  const placeholders = ambiguousIds.map(() => "?").join(",");
+  const budgets = await query<{
+    id: string;
+    categoryId: string;
+    monthKey: string;
+  }>(
+    `
+    SELECT id, categoryId, monthKey
+    FROM budgets
+    WHERE ownerKey = ?
+      AND categoryId IN (${placeholders});
+    `,
+    [ownerKey, ...ambiguousIds]
+  );
+
+  if (budgets.length === 0) return;
+
+  const now = new Date().toISOString();
+
+  for (const budget of budgets) {
+    const inferred = await inferBudgetCategoryName(ownerKey, budget.categoryId, budget.monthKey);
+    if (!inferred) continue;
+
+    const categoryId = await ensureRepairCategory(scope, deviceId, inferred, now);
+    if (categoryId === budget.categoryId) continue;
+
+    await run(
+      `
+      UPDATE budgets
+      SET categoryId = ?, updatedAt = ?
+      WHERE ownerKey = ?
+        AND id = ?;
+      `,
+      [categoryId, now, ownerKey, budget.id]
+    );
+  }
+}
+
+async function inferBudgetCategoryName(
+  ownerKey: string,
+  categoryId: string,
+  monthKey: string
+): Promise<string | null> {
+  const rows = await query<{
+    description: string | null;
+    amountCents: number;
+  }>(
+    `
+    SELECT description, amountCents
+    FROM expenses
+    WHERE ownerKey = ?
+      AND deletedAt IS NULL
+      AND categoryId = ?
+      AND expenseDate LIKE ? || '%';
+    `,
+    [ownerKey, categoryId, monthKey]
+  );
+
+  const totals = new Map<string, number>();
+  rows.forEach((row) => {
+    const inferredName = inferDefaultCategoryName(row.description);
+    if (!inferredName) return;
+    totals.set(inferredName, (totals.get(inferredName) ?? 0) + row.amountCents);
+  });
+
+  let bestName: string | null = null;
+  let bestTotal = 0;
+  totals.forEach((total, name) => {
+    if (total > bestTotal) {
+      bestName = name;
+      bestTotal = total;
+    }
+  });
+
+  return bestName;
 }
 
 async function ensureRepairCategory(

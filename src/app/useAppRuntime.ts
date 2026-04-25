@@ -6,6 +6,7 @@ import { useAuthGate } from "../state/authGateContext";
 import { attachAnonymousDataToUser } from "../services/loginMergeService";
 import { ensureDefaultCategories } from "../services/categorySeedService";
 import {
+  repairAmbiguousCategoryRefs,
   repairInvalidScopedDefaultCategoryIds,
   repairLocalCategoryDuplicates,
   repairMissingCategoryRefs,
@@ -81,6 +82,7 @@ export function useAppRuntime() {
           await pullRemoteBudgets(auth.user.id);
           await pullRemoteRecurringExpenses(auth.user.id);
           await repairMissingCategoryRefs(scope, deviceId);
+          await repairAmbiguousCategoryRefs(scope, deviceId);
           await materializeDueRecurringExpenses(scope, deviceId);
           await pushDirtyCategories(auth.user.id);
           await pushDirtyExpenses(auth.user.id);
@@ -95,6 +97,7 @@ export function useAppRuntime() {
           await repairLocalCategoryDuplicates(scope, deviceId);
           await ensureDefaultCategories(scope, deviceId);
           await repairMissingCategoryRefs(scope, deviceId);
+          await repairAmbiguousCategoryRefs(scope, deviceId);
           await materializeDueRecurringExpenses(scope, deviceId);
         }
 

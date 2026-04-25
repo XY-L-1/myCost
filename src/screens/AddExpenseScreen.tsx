@@ -17,6 +17,7 @@ import { ExpenseRepository } from "../repositories/expenseRepository";
 import { CategoryRepository } from "../repositories/categoryRepository";
 import { ensureDefaultCategories } from "../services/categorySeedService";
 import {
+  repairAmbiguousCategoryRefs,
   repairLocalCategoryDuplicates,
   repairMissingCategoryRefs,
 } from "../services/categoryRepairService";
@@ -56,6 +57,7 @@ export function AddExpenseScreen({ navigation, route }: Props) {
     await repairLocalCategoryDuplicates(scope, deviceId);
     await ensureDefaultCategories(scope, deviceId);
     await repairMissingCategoryRefs(scope, deviceId);
+    await repairAmbiguousCategoryRefs(scope, deviceId);
     const categoryRows = await CategoryRepository.getAll(scope);
     setCategories(categoryRows.map((item) => ({ id: item.id, name: item.name })));
     setCategoryId((current) =>
