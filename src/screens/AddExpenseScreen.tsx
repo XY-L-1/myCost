@@ -66,10 +66,14 @@ export function AddExpenseScreen({ navigation, route }: Props) {
         route.params.expenseId
       );
       if (expense) {
+        const canonicalCategory = await CategoryRepository.getCanonicalByIdInScope(
+          scope,
+          expense.categoryId
+        );
         setExpenseId(expense.id);
         setAmount((expense.amountCents / 100).toFixed(2));
         setDescription(expense.description ?? "");
-        setCategoryId(expense.categoryId);
+        setCategoryId(canonicalCategory?.id ?? categoryRows[0]?.id ?? null);
         setDateKey(expense.expenseDate);
       }
     }

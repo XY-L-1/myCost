@@ -26,7 +26,8 @@ export function ExpenseListScreen() {
   const { formatCurrency, formatDate, formatMonth } = useFormatters();
   const { categoriesRevision } = useSyncGate();
   const [expenses, setExpenses] = useState<Awaited<ReturnType<typeof ExpenseRepository.list>>>([]);
-  const [categoryMap, setCategoryMap] = useState<Map<string, string>>(new Map());
+  const [displayCategoryMap, setDisplayCategoryMap] = useState<Map<string, string>>(new Map());
+  const [filterCategories, setFilterCategories] = useState<Array<{ id: string; name: string }>>([]);
   const [monthKeys, setMonthKeys] = useState<string[]>([]);
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>("all");
@@ -35,9 +36,10 @@ export function ExpenseListScreen() {
   const load = useCallback(async () => {
     if (!scope) return;
 
-    const [monthRows, categoryRows] = await Promise.all([
+    const [monthRows, categoryRows, displayMap] = await Promise.all([
       ExpenseRepository.getAvailableMonthKeys(scope),
-      CategoryRepository.getAll(scope, { includeArchived: true }),
+      CategoryRepository.getAll(scope),
+      CategoryRepository.getDisplayNameMap(scope),
     ]);
     const expenseRows = await ExpenseRepository.list(scope, {
       monthKey: selectedMonth ?? undefined,
@@ -47,7 +49,14 @@ export function ExpenseListScreen() {
 
     setMonthKeys(monthRows);
     setExpenses(expenseRows);
-    setCategoryMap(new Map(categoryRows.map((item) => [item.id, item.name])));
+    setFilterCategories(categoryRows.map((item) => ({ id: item.id, name: item.name })));
+    setDisplayCategoryMap(displayMap);
+    if (
+      selectedCategoryId !== "all" &&
+      !categoryRows.some((category) => category.id === selectedCategoryId)
+    ) {
+      setSelectedCategoryId("all");
+    }
   }, [scope, search, selectedCategoryId, selectedMonth]);
 
   useEffect(() => {
@@ -61,8 +70,8 @@ export function ExpenseListScreen() {
   );
 
   const categoryEntries = useMemo(
-    () => Array.from(categoryMap.entries()),
-    [categoryMap]
+    () => filterCategories.map((category) => [category.id, category.name] as const),
+    [filterCategories]
   );
 
   if (!scope) return null;
@@ -162,10 +171,10 @@ export function ExpenseListScreen() {
               onPress={() => navigation.navigate("ExpenseEditor", { expenseId: expense.id })}
             >
               <Text style={styles.rowTitle}>
-                {expense.description?.trim() || categoryMap.get(expense.categoryId)}
+                {expense.description?.trim() || displayCategoryMap.get(expense.categoryId)}
               </Text>
               <Text style={styles.rowMeta}>
-                {categoryMap.get(expense.categoryId)} · {formatDate(expense.expenseDate)}
+                {(displayCategoryMap.get(expense.categoryId) ?? t("common.category"))} · {formatDate(expense.expenseDate)}
               </Text>
               <Text style={styles.rowAmount}>
                 {formatCurrency(expense.amountCents, expense.currency)}

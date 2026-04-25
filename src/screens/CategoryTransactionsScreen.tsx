@@ -25,7 +25,7 @@ export function CategoryTransactionsScreen({ navigation, route }: Props) {
   const load = useCallback(async () => {
     if (!scope) return;
     const [category, rows] = await Promise.all([
-      CategoryRepository.getByIdInScope(scope, route.params.categoryId),
+      CategoryRepository.getCanonicalByIdInScope(scope, route.params.categoryId),
       ExpenseRepository.list(scope, {
         monthKey: route.params.monthKey,
         categoryId: route.params.categoryId,

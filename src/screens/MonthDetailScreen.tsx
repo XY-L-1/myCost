@@ -25,12 +25,11 @@ export function MonthDetailScreen({ navigation, route }: Props) {
 
   const load = useCallback(async () => {
     if (!scope) return;
-    const [categoryRows, breakdown] = await Promise.all([
-      CategoryRepository.getAll(scope, { includeArchived: true }),
+    const [categoryMap, breakdown] = await Promise.all([
+      CategoryRepository.getDisplayNameMap(scope),
       ExpenseRepository.getMonthlyCategoryBreakdown(scope, route.params.monthKey),
     ]);
 
-    const categoryMap = new Map(categoryRows.map((item) => [item.id, item.name]));
     setRows(
       breakdown.map((item) => ({
         categoryId: item.categoryId,

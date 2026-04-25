@@ -1,6 +1,10 @@
 import { query, queryFirst, run } from "../db/database";
 import { DataScope, buildScopeFilter } from "../domain/dataScope";
-import { collapseCategoriesByIdentity } from "../domain/categoryMerge";
+import {
+  categoryIdentityKey,
+  collapseCategoriesByIdentity,
+  preferCategoryRecord,
+} from "../domain/categoryMerge";
 import { Category, CategorySchema } from "../types/category";
 import { notifyCategoryMutation } from "../sync/syncEvents";
 import { normalizeCategoryName } from "../utils/categoryIdentity";
@@ -49,6 +53,51 @@ export class CategoryRepository {
     return collapseCategoriesByIdentity(categories, {
       includeArchived: options.includeArchived,
     });
+  }
+
+  static async getDisplayNameMap(scope: DataScope): Promise<Map<string, string>> {
+    const owner = buildScopeFilter(scope);
+    const rows = await query<Category>(
+      `
+      SELECT *
+      FROM categories
+      WHERE ${owner.clause};
+      `,
+      owner.params
+    );
+    const categories = rows.map((row) => CategorySchema.parse(row));
+    const groups = new Map<string, Category[]>();
+
+    categories.forEach((category) => {
+      const key = categoryIdentityKey(category);
+      const group = groups.get(key) ?? [];
+      group.push(category);
+      groups.set(key, group);
+    });
+
+    const nameMap = new Map<string, string>();
+    groups.forEach((group) => {
+      const active = group.filter((category) => !category.deletedAt);
+      const canonical = (active.length > 0 ? active : group).reduce(
+        preferCategoryRecord
+      );
+      group.forEach((category) => {
+        nameMap.set(category.id, canonical.name);
+      });
+    });
+
+    return nameMap;
+  }
+
+  static async getCanonicalByIdInScope(
+    scope: DataScope,
+    id: string
+  ): Promise<Category | null> {
+    const category = await this.getByIdInScope(scope, id);
+    if (!category) return null;
+
+    const canonical = await this.findByNormalizedName(scope, category.name);
+    return canonical ?? category;
   }
 
   static async getByIdInScope(

@@ -44,13 +44,12 @@ export function MonthlySummaryScreen() {
       return;
     }
 
-    const [categoryRows, monthTotal, categoryBreakdown] = await Promise.all([
-      CategoryRepository.getAll(scope, { includeArchived: true }),
+    const [categoryMap, monthTotal, categoryBreakdown] = await Promise.all([
+      CategoryRepository.getDisplayNameMap(scope),
       ExpenseRepository.getMonthlyTotal(scope, monthKey),
       ExpenseRepository.getMonthlyCategoryBreakdown(scope, monthKey),
     ]);
 
-    const categoryMap = new Map(categoryRows.map((item) => [item.id, item.name]));
     setSelectedMonth(monthKey);
     setTotal(monthTotal);
     setBreakdown(

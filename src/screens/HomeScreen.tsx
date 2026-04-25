@@ -55,7 +55,7 @@ export function HomeScreen() {
         ExpenseRepository.getMonthlyTotal(scope, monthKey),
         BudgetRepository.getByMonth(scope, monthKey),
         RecurringExpenseRepository.getAll(scope),
-        CategoryRepository.getAll(scope, { includeArchived: true }),
+        CategoryRepository.getDisplayNameMap(scope),
       ]);
 
     setMonthTotal(monthTotalValue);
@@ -72,7 +72,7 @@ export function HomeScreen() {
       recurringItems.filter((item) => item.isActive && item.nextDueDate <= todayKey)
         .length
     );
-    setCategories(new Map(categoryRows.map((item) => [item.id, item.name])));
+    setCategories(categoryRows);
   }, [monthKey, scope, todayKey]);
 
   useEffect(() => {
