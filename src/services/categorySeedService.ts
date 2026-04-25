@@ -37,7 +37,7 @@ export async function ensureDefaultCategories(
 
   const groupedByNormalized = new Map<string, typeof existing>();
   existing.forEach((row) => {
-    const normalized = normalizeCategoryName(row.normalizedName ?? row.name);
+    const normalized = normalizeCategoryName(row.name);
     const group = groupedByNormalized.get(normalized) ?? [];
     group.push(row);
     groupedByNormalized.set(normalized, group);

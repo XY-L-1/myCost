@@ -58,7 +58,7 @@ export function BudgetScreen() {
     Array.from(categoryIds).forEach((categoryId) => {
       const category = categoryMap.get(categoryId);
       const normalizedKey = category
-        ? category.normalizedName ?? normalizeCategoryName(category.name)
+        ? normalizeCategoryName(category.name)
         : `missing:${categoryId}`;
       const archived = !!category?.deletedAt;
       const name = category

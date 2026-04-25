@@ -10,7 +10,7 @@ export type MergeableCategory = {
 export function categoryIdentityKey(
   category: Pick<MergeableCategory, "name" | "normalizedName">
 ): string {
-  return (category.normalizedName ?? category.name)
+  return category.name
     .trim()
     .toLowerCase()
     .replace(/\s+/g, " ");

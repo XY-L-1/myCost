@@ -124,8 +124,15 @@ export class CategoryRepository {
   ): Promise<Category | null> {
     const owner = buildScopeFilter(scope);
     const normalizedName = normalizeCategoryName(name);
-    const clauses = [`${owner.clause}`, `normalizedName = ?`];
-    const params: Array<string> = [...owner.params, normalizedName];
+    const clauses = [
+      `${owner.clause}`,
+      `(normalizedName = ? OR LOWER(TRIM(name)) = ?)`,
+    ];
+    const params: Array<string> = [
+      ...owner.params,
+      normalizedName,
+      normalizedName,
+    ];
 
     if (!options.includeArchived) {
       clauses.push("deletedAt IS NULL");
@@ -292,14 +299,15 @@ export class CategoryRepository {
       SELECT *
       FROM categories
       WHERE ownerKey = ?
-        AND normalizedName = ?
+        AND (normalizedName = ? OR LOWER(TRIM(name)) = ?)
         AND deletedAt IS NULL
         AND id != ?
       ORDER BY createdAt ASC, id ASC;
       `,
       [
         category.ownerKey,
-        category.normalizedName ?? normalizeCategoryName(restoredName),
+        normalizeCategoryName(restoredName),
+        normalizeCategoryName(restoredName),
         category.id,
       ]
     );

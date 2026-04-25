@@ -13,6 +13,13 @@ test("categoryIdentityKey normalizes names consistently", () => {
   );
 });
 
+test("categoryIdentityKey ignores stale normalized names", () => {
+  assert.equal(
+    categoryIdentityKey({ name: "Gas", normalizedName: "category" }),
+    "gas"
+  );
+});
+
 test("preferCategoryRecord keeps active categories over archived duplicates", () => {
   const archived = {
     id: "archived-food",
@@ -57,6 +64,33 @@ test("collapseCategoriesByIdentity hides archived duplicates when active exists"
   assert.deepEqual(collapseCategoriesByIdentity(categories, { includeArchived: true }), [
     categories[1],
   ]);
+});
+
+test("collapseCategoriesByIdentity does not group stale normalized names together", () => {
+  const categories = [
+    {
+      id: "gas-id",
+      name: "Gas",
+      normalizedName: "category",
+      deletedAt: null,
+      createdAt: "2026-03-01T00:00:00.000Z",
+      updatedAt: "2026-03-01T00:00:00.000Z",
+    },
+    {
+      id: "category-id",
+      name: "Category",
+      normalizedName: "category",
+      deletedAt: null,
+      createdAt: "2026-03-02T00:00:00.000Z",
+      updatedAt: "2026-03-02T00:00:00.000Z",
+    },
+  ];
+
+  const collapsed = collapseCategoriesByIdentity(categories);
+  assert.deepEqual(
+    collapsed.map((category) => category.name),
+    ["Category", "Gas"]
+  );
 });
 
 test("collapseCategoriesByIdentity keeps one archived category when no active row exists", () => {

@@ -449,11 +449,11 @@ async function ensureRepairCategory(
     SELECT *
     FROM categories
     WHERE ownerKey = ?
-      AND normalizedName = ?
+      AND (normalizedName = ? OR LOWER(TRIM(name)) = ?)
     ORDER BY deletedAt IS NOT NULL, createdAt ASC, id ASC
     LIMIT 1;
     `,
-    [ownerKey, normalizedName]
+    [ownerKey, normalizedName, normalizedName]
   );
 
   if (existing.length > 0) {
