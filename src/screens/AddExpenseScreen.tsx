@@ -16,7 +16,10 @@ import { useFormatters } from "../hooks/useFormatters";
 import { ExpenseRepository } from "../repositories/expenseRepository";
 import { CategoryRepository } from "../repositories/categoryRepository";
 import { ensureDefaultCategories } from "../services/categorySeedService";
-import { repairLocalCategoryDuplicates } from "../services/categoryRepairService";
+import {
+  repairLocalCategoryDuplicates,
+  repairMissingCategoryRefs,
+} from "../services/categoryRepairService";
 import { RootStackParamList } from "../navigation/RootNavigator";
 import { useAppInitStore } from "../state/appInitStore";
 import { useSettingsStore } from "../settings/settingsStore";
@@ -52,6 +55,7 @@ export function AddExpenseScreen({ navigation, route }: Props) {
     if (!scope || !deviceId) return;
     await repairLocalCategoryDuplicates(scope, deviceId);
     await ensureDefaultCategories(scope, deviceId);
+    await repairMissingCategoryRefs(scope, deviceId);
     const categoryRows = await CategoryRepository.getAll(scope);
     setCategories(categoryRows.map((item) => ({ id: item.id, name: item.name })));
     setCategoryId((current) =>

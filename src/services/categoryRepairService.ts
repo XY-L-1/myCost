@@ -7,6 +7,7 @@ import {
   deterministicGuestCategoryId,
   normalizeCategoryName,
 } from "../utils/categoryIdentity";
+import { inferDefaultCategoryName } from "../domain/categoryInference";
 import { repointCategoryReferences } from "./categoryReferenceService";
 
 /**
@@ -246,8 +247,9 @@ export async function repairInvalidScopedDefaultCategoryIds(): Promise<void> {
 /**
  * repairMissingCategoryRefs
  *
- * Ensures every expense references a local category row.
- * Any missing categoryId is reassigned to the deterministic fallback category.
+ * Ensures every record references a local category row.
+ * Obvious orphaned expenses are inferred from their description before the
+ * remaining records fall back to the deterministic fallback category.
  */
 export async function repairMissingCategoryRefs(
   scope: DataScope,
@@ -290,6 +292,9 @@ export async function repairMissingCategoryRefs(
   const missingIds = referencedIds.filter((id) => !existingIds.has(id));
 
   if (missingIds.length === 0) return;
+
+  await repairMissingExpenseCategoryRefs(scope, deviceId, missingIds);
+  await repairMissingRecurringCategoryRefs(scope, deviceId, missingIds);
 
   const fallbackName = DEFAULT_CATEGORIES[DEFAULT_CATEGORIES.length - 1];
   const fallbackId = scope.userId
@@ -342,6 +347,159 @@ export async function repairMissingCategoryRefs(
   }
 
   await repointCategoryReferences(ownerKey, missingIds, fallbackId, now);
+}
+
+async function repairMissingExpenseCategoryRefs(
+  scope: DataScope,
+  deviceId: string,
+  missingIds: string[]
+): Promise<void> {
+  if (missingIds.length === 0) return;
+
+  const ownerKey = scope.ownerKey;
+  const placeholders = missingIds.map(() => "?").join(",");
+  const rows = await query<{
+    id: string;
+    categoryId: string;
+    description: string | null;
+  }>(
+    `
+    SELECT id, categoryId, description
+    FROM expenses
+    WHERE ownerKey = ?
+      AND categoryId IN (${placeholders});
+    `,
+    [ownerKey, ...missingIds]
+  );
+
+  const now = new Date().toISOString();
+
+  for (const row of rows) {
+    const inferredName = inferDefaultCategoryName(row.description);
+    if (!inferredName) continue;
+
+    const categoryId = await ensureRepairCategory(scope, deviceId, inferredName, now);
+    await run(
+      `
+      UPDATE expenses
+      SET categoryId = ?, updatedAt = ?, dirty = 1, version = version + 1
+      WHERE ownerKey = ?
+        AND id = ?;
+      `,
+      [categoryId, now, ownerKey, row.id]
+    );
+  }
+}
+
+async function repairMissingRecurringCategoryRefs(
+  scope: DataScope,
+  deviceId: string,
+  missingIds: string[]
+): Promise<void> {
+  if (missingIds.length === 0) return;
+
+  const ownerKey = scope.ownerKey;
+  const placeholders = missingIds.map(() => "?").join(",");
+  const rows = await query<{
+    id: string;
+    categoryId: string;
+    description: string | null;
+    title: string;
+  }>(
+    `
+    SELECT id, categoryId, description, title
+    FROM recurring_expenses
+    WHERE ownerKey = ?
+      AND categoryId IN (${placeholders});
+    `,
+    [ownerKey, ...missingIds]
+  );
+
+  const now = new Date().toISOString();
+
+  for (const row of rows) {
+    const inferredName = inferDefaultCategoryName(
+      `${row.title} ${row.description ?? ""}`
+    );
+    if (!inferredName) continue;
+
+    const categoryId = await ensureRepairCategory(scope, deviceId, inferredName, now);
+    await run(
+      `
+      UPDATE recurring_expenses
+      SET categoryId = ?, updatedAt = ?
+      WHERE ownerKey = ?
+        AND id = ?;
+      `,
+      [categoryId, now, ownerKey, row.id]
+    );
+  }
+}
+
+async function ensureRepairCategory(
+  scope: DataScope,
+  deviceId: string,
+  name: string,
+  now: string
+): Promise<string> {
+  const ownerKey = scope.ownerKey;
+  const normalizedName = normalizeCategoryName(name);
+  const existing = await query<Category>(
+    `
+    SELECT *
+    FROM categories
+    WHERE ownerKey = ?
+      AND normalizedName = ?
+    ORDER BY deletedAt IS NOT NULL, createdAt ASC, id ASC
+    LIMIT 1;
+    `,
+    [ownerKey, normalizedName]
+  );
+
+  if (existing.length > 0) {
+    const row = existing[0];
+    if (row.deletedAt) {
+      await run(
+        `
+        UPDATE categories
+        SET deletedAt = NULL, updatedAt = ?, dirty = 1, version = version + 1
+        WHERE ownerKey = ?
+          AND id = ?;
+        `,
+        [now, ownerKey, row.id]
+      );
+    }
+    return row.id;
+  }
+
+  const categoryId = scope.userId
+    ? deterministicCategoryId(scope.userId, name)
+    : deterministicGuestCategoryId(name);
+
+  await run(
+    `
+    INSERT INTO categories (
+      id, name, budget, normalizedName, createdAt, updatedAt, deletedAt,
+      dirty, version, deviceId, ownerKey, userId
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    `,
+    [
+      categoryId,
+      name,
+      0,
+      normalizedName,
+      now,
+      now,
+      null,
+      1,
+      1,
+      deviceId,
+      ownerKey,
+      scope.userId,
+    ]
+  );
+
+  return categoryId;
 }
 
 async function deleteCategories(ownerKey: string, categoryIds: string[]) {
