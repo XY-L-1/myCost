@@ -7,6 +7,7 @@ import {
    RecurringExpenseSchema,
 } from "../types/recurringExpense";
 import { supabase } from "../auth/supabaseClient";
+import { budgetIdentityKey } from "../domain/budgetMerge";
 import { normalizeCategoryName } from "../utils/categoryIdentity";
 import { repointCategoryReferences } from "../services/categoryReferenceService";
 
@@ -383,32 +384,13 @@ export async function pushLocalBudgets(userId: string): Promise<void> {
 
    if (localBudgets.length === 0) return;
 
-   const remoteMap = await fetchRemoteBudgetMap(userId);
+   const remoteRows = await fetchRemoteBudgets(userId);
 
    for (const budget of localBudgets) {
-      const key = budgetKey(budget.categoryId, budget.monthKey);
-      const remote = remoteMap.get(key);
+      const remote = findRemoteBudgetMatch(remoteRows, budget);
 
       if (remote) {
-         const localUpdated = new Date(budget.updatedAt).getTime();
-         const remoteUpdated = new Date(remote.updated_at).getTime();
-         if (localUpdated <= remoteUpdated) {
-            continue;
-         }
-
-         const { error } = await supabase
-            .from("budgets")
-            .update({
-               amount_cents: budget.amountCents,
-               updated_at: budget.updatedAt,
-            })
-            .eq("id", remote.id)
-            .eq("user_id", userId);
-
-         if (error) {
-            console.error("[SYNC] Failed to update budget", budget.id, error);
-            throw error;
-         }
+         await updateRemoteBudgetIfNewer(userId, budget, remote);
          continue;
       }
 
@@ -423,6 +405,14 @@ export async function pushLocalBudgets(userId: string): Promise<void> {
       });
 
       if (error) {
+         const errorCode = (error as { code?: string }).code;
+         if (errorCode === "23505") {
+            const existing = await fetchRemoteBudgetByIdOrKey(userId, budget);
+            if (existing) {
+               await updateRemoteBudgetIfNewer(userId, budget, existing);
+               continue;
+            }
+         }
          console.error("[SYNC] Failed to insert budget", budget.id, error);
          throw error;
       }
@@ -932,12 +922,12 @@ async function findLocalCategoryByNormalized(
 }
 
 function budgetKey(categoryId: string, monthKey: string) {
-   return `${categoryId}:${monthKey}`;
+   return budgetIdentityKey({ categoryId, monthKey });
 }
 
-async function fetchRemoteBudgetMap(
+async function fetchRemoteBudgets(
    userId: string
-): Promise<Map<string, RemoteBudgetRow>> {
+): Promise<RemoteBudgetRow[]> {
    const { data, error } = await supabase
       .from("budgets")
       .select("id,user_id,category_id,month_key,amount_cents,created_at,updated_at")
@@ -948,11 +938,79 @@ async function fetchRemoteBudgetMap(
       throw error;
    }
 
-   const map = new Map<string, RemoteBudgetRow>();
-   (data as RemoteBudgetRow[] | null)?.forEach((row) => {
-      map.set(budgetKey(row.category_id, row.month_key), row);
-   });
-   return map;
+   return (data as RemoteBudgetRow[] | null) ?? [];
+}
+
+function findRemoteBudgetMatch(
+   remoteRows: RemoteBudgetRow[],
+   budget: Budget
+): RemoteBudgetRow | undefined {
+   const byId = remoteRows.find((row) => row.id === budget.id);
+   if (byId) return byId;
+
+   const key = budgetKey(budget.categoryId, budget.monthKey);
+   return remoteRows.find((row) => budgetKey(row.category_id, row.month_key) === key);
+}
+
+async function fetchRemoteBudgetByIdOrKey(
+   userId: string,
+   budget: Budget
+): Promise<RemoteBudgetRow | null> {
+   const { data: byId, error: byIdError } = await supabase
+      .from("budgets")
+      .select("id,user_id,category_id,month_key,amount_cents,created_at,updated_at")
+      .eq("user_id", userId)
+      .eq("id", budget.id)
+      .limit(1);
+
+   if (byIdError) {
+      console.error("[SYNC] Failed to fetch budget after conflict", byIdError);
+      throw byIdError;
+   }
+
+   const idMatch = (byId as RemoteBudgetRow[] | null)?.[0];
+   if (idMatch) return idMatch;
+
+   const { data: byKey, error: byKeyError } = await supabase
+      .from("budgets")
+      .select("id,user_id,category_id,month_key,amount_cents,created_at,updated_at")
+      .eq("user_id", userId)
+      .eq("category_id", budget.categoryId)
+      .eq("month_key", budget.monthKey)
+      .limit(1);
+
+   if (byKeyError) {
+      console.error("[SYNC] Failed to fetch budget by key after conflict", byKeyError);
+      throw byKeyError;
+   }
+
+   return (byKey as RemoteBudgetRow[] | null)?.[0] ?? null;
+}
+
+async function updateRemoteBudgetIfNewer(
+   userId: string,
+   budget: Budget,
+   remote: RemoteBudgetRow
+): Promise<void> {
+   const localUpdated = new Date(budget.updatedAt).getTime();
+   const remoteUpdated = new Date(remote.updated_at).getTime();
+   if (localUpdated <= remoteUpdated) return;
+
+   const { error } = await supabase
+      .from("budgets")
+      .update({
+         category_id: budget.categoryId,
+         month_key: budget.monthKey,
+         amount_cents: budget.amountCents,
+         updated_at: budget.updatedAt,
+      })
+      .eq("id", remote.id)
+      .eq("user_id", userId);
+
+   if (error) {
+      console.error("[SYNC] Failed to update budget", budget.id, error);
+      throw error;
+   }
 }
 
 async function fetchRemoteRecurringExpenseMap(

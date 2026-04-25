@@ -5,6 +5,12 @@ export type MergeableBudget = {
   updatedAt: string;
 };
 
+export type BudgetIdentity = {
+  id: string;
+  categoryId: string;
+  monthKey: string;
+};
+
 export function preferBudgetRecord<T extends MergeableBudget>(a: T, b: T): T {
   const updatedDiff =
     new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
@@ -19,4 +25,19 @@ export function preferBudgetRecord<T extends MergeableBudget>(a: T, b: T): T {
   }
 
   return a.id >= b.id ? a : b;
+}
+
+export function budgetIdentityKey(budget: Pick<BudgetIdentity, "categoryId" | "monthKey">): string {
+  return `${budget.categoryId}:${budget.monthKey}`;
+}
+
+export function findMatchingBudgetRecord<T extends BudgetIdentity>(
+  records: T[],
+  budget: BudgetIdentity
+): T | undefined {
+  const byId = records.find((record) => record.id === budget.id);
+  if (byId) return byId;
+
+  const key = budgetIdentityKey(budget);
+  return records.find((record) => budgetIdentityKey(record) === key);
 }

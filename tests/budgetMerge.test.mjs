@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { preferBudgetRecord } from "../.test-dist/src/domain/budgetMerge.js";
+import {
+  budgetIdentityKey,
+  findMatchingBudgetRecord,
+  preferBudgetRecord,
+} from "../.test-dist/src/domain/budgetMerge.js";
 
 test("preferBudgetRecord keeps the most recently updated budget", () => {
   const canonical = {
@@ -68,4 +72,57 @@ test("existing user budget survives a login merge collision when it is newer", (
   };
 
   assert.equal(preferBudgetRecord(userBudget, guestBudget), userBudget);
+});
+
+test("budgetIdentityKey matches the remote unique budget scope", () => {
+  assert.equal(
+    budgetIdentityKey({
+      categoryId: "category-food",
+      monthKey: "2026-04",
+    }),
+    "category-food:2026-04"
+  );
+});
+
+test("findMatchingBudgetRecord prefers primary-key matches before scope matches", () => {
+  const records = [
+    {
+      id: "same-scope",
+      categoryId: "category-food",
+      monthKey: "2026-04",
+    },
+    {
+      id: "same-id",
+      categoryId: "category-rent",
+      monthKey: "2026-05",
+    },
+  ];
+
+  assert.equal(
+    findMatchingBudgetRecord(records, {
+      id: "same-id",
+      categoryId: "category-food",
+      monthKey: "2026-04",
+    }),
+    records[1]
+  );
+});
+
+test("findMatchingBudgetRecord falls back to category-month matches", () => {
+  const records = [
+    {
+      id: "remote-budget",
+      categoryId: "category-food",
+      monthKey: "2026-04",
+    },
+  ];
+
+  assert.equal(
+    findMatchingBudgetRecord(records, {
+      id: "local-budget",
+      categoryId: "category-food",
+      monthKey: "2026-04",
+    }),
+    records[0]
+  );
 });
