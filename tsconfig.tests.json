@@ -11,6 +11,7 @@
   },
   "include": [
     "src/domain/budgetMerge.ts",
+    "src/domain/categoryMerge.ts",
     "src/domain/dataScope.ts",
     "src/domain/expenseMutations.ts",
     "src/utils/date.ts",

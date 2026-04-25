@@ -15,6 +15,8 @@ import { useCurrentScope } from "../hooks/useCurrentScope";
 import { useFormatters } from "../hooks/useFormatters";
 import { ExpenseRepository } from "../repositories/expenseRepository";
 import { CategoryRepository } from "../repositories/categoryRepository";
+import { ensureDefaultCategories } from "../services/categorySeedService";
+import { repairLocalCategoryDuplicates } from "../services/categoryRepairService";
 import { RootStackParamList } from "../navigation/RootNavigator";
 import { useAppInitStore } from "../state/appInitStore";
 import { useSettingsStore } from "../settings/settingsStore";
@@ -47,10 +49,16 @@ export function AddExpenseScreen({ navigation, route }: Props) {
   }, [amount]);
 
   const load = useCallback(async () => {
-    if (!scope) return;
+    if (!scope || !deviceId) return;
+    await repairLocalCategoryDuplicates(scope, deviceId);
+    await ensureDefaultCategories(scope, deviceId);
     const categoryRows = await CategoryRepository.getAll(scope);
     setCategories(categoryRows.map((item) => ({ id: item.id, name: item.name })));
-    setCategoryId((current) => current ?? categoryRows[0]?.id ?? null);
+    setCategoryId((current) =>
+      categoryRows.some((item) => item.id === current)
+        ? current
+        : categoryRows[0]?.id ?? null
+    );
 
     if (route.params?.expenseId) {
       const expense = await ExpenseRepository.getByIdInScope(
@@ -66,7 +74,7 @@ export function AddExpenseScreen({ navigation, route }: Props) {
       }
     }
     setLoading(false);
-  }, [route.params?.expenseId, scope]);
+  }, [deviceId, route.params?.expenseId, scope]);
 
   useEffect(() => {
     load();

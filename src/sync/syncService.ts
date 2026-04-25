@@ -8,6 +8,7 @@ import {
 } from "../types/recurringExpense";
 import { supabase } from "../auth/supabaseClient";
 import { budgetIdentityKey } from "../domain/budgetMerge";
+import { categoryIdentityKey, preferCategoryRecord } from "../domain/categoryMerge";
 import { normalizeCategoryName } from "../utils/categoryIdentity";
 import { repointCategoryReferences } from "../services/categoryReferenceService";
 
@@ -341,7 +342,7 @@ export async function pullRemoteCategories(userId: string): Promise<void> {
       to += pageSize;
    }
 
-   await applyRemoteCategoryChanges(userId, remoteRows);
+   await applyRemoteCategoryChanges(userId, collapseRemoteCategoryRows(remoteRows));
 }
 
 export async function pullRemoteBudgets(userId: string): Promise<void> {
@@ -576,6 +577,53 @@ export async function applyRemoteCategoryChanges(
          await updateLocalCategory(remote);
       }
    }
+}
+
+function collapseRemoteCategoryRows(rows: RemoteCategoryRow[]): RemoteCategoryRow[] {
+   const groups = new Map<string, RemoteCategoryRow[]>();
+
+   rows.forEach((row) => {
+      const key = categoryIdentityKey({
+         name: row.name,
+         normalizedName: row.normalized_name,
+      });
+      const group = groups.get(key) ?? [];
+      group.push(row);
+      groups.set(key, group);
+   });
+
+   const collapsed: RemoteCategoryRow[] = [];
+   groups.forEach((group) => {
+      collapsed.push(group.reduce(preferRemoteCategoryRow));
+   });
+
+   return collapsed;
+}
+
+function preferRemoteCategoryRow(
+   a: RemoteCategoryRow,
+   b: RemoteCategoryRow
+): RemoteCategoryRow {
+   const preferred = preferCategoryRecord(
+      {
+         id: a.id,
+         name: a.name,
+         normalizedName: a.normalized_name,
+         deletedAt: a.deleted_at,
+         createdAt: a.created_at,
+         updatedAt: a.updated_at,
+      },
+      {
+         id: b.id,
+         name: b.name,
+         normalizedName: b.normalized_name,
+         deletedAt: b.deleted_at,
+         createdAt: b.created_at,
+         updatedAt: b.updated_at,
+      }
+   );
+
+   return preferred.id === a.id ? a : b;
 }
 
 async function applyRemoteBudgetChanges(

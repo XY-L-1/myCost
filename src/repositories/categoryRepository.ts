@@ -1,5 +1,6 @@
 import { query, queryFirst, run } from "../db/database";
 import { DataScope, buildScopeFilter } from "../domain/dataScope";
+import { collapseCategoriesByIdentity } from "../domain/categoryMerge";
 import { Category, CategorySchema } from "../types/category";
 import { notifyCategoryMutation } from "../sync/syncEvents";
 import { normalizeCategoryName } from "../utils/categoryIdentity";
@@ -44,7 +45,10 @@ export class CategoryRepository {
       owner.params
     );
 
-    return rows.map((row) => CategorySchema.parse(row));
+    const categories = rows.map((row) => CategorySchema.parse(row));
+    return collapseCategoriesByIdentity(categories, {
+      includeArchived: options.includeArchived,
+    });
   }
 
   static async getByIdInScope(
