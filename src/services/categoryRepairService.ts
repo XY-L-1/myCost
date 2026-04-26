@@ -1,4 +1,5 @@
 import { query, queryFirst, run } from "../db/database";
+import { preferBudgetRecord } from "../domain/budgetMerge";
 import { Category, CategorySchema } from "../types/category";
 import { DataScope, GUEST_OWNER_KEY } from "../domain/dataScope";
 import {
@@ -587,6 +588,54 @@ async function repairAmbiguousBudgets(
     const categoryId = await ensureRepairCategory(scope, deviceId, inferred, now);
     if (categoryId === budget.categoryId) continue;
 
+    await moveBudgetToCategory(ownerKey, budget.id, categoryId, now);
+  }
+}
+
+async function moveBudgetToCategory(
+  ownerKey: string,
+  budgetId: string,
+  categoryId: string,
+  now: string
+): Promise<void> {
+  const sourceRows = await query<{
+    id: string;
+    categoryId: string;
+    monthKey: string;
+    amountCents: number;
+    createdAt: string;
+    updatedAt: string;
+    ownerKey: string;
+    userId: string | null;
+  }>(
+    `
+    SELECT *
+    FROM budgets
+    WHERE ownerKey = ?
+      AND id = ?
+    LIMIT 1;
+    `,
+    [ownerKey, budgetId]
+  );
+
+  const source = sourceRows[0];
+  if (!source) return;
+
+  const targetRows = await query<typeof source>(
+    `
+    SELECT *
+    FROM budgets
+    WHERE ownerKey = ?
+      AND categoryId = ?
+      AND monthKey = ?
+      AND id != ?
+    LIMIT 1;
+    `,
+    [ownerKey, categoryId, source.monthKey, source.id]
+  );
+
+  const target = targetRows[0];
+  if (!target) {
     await run(
       `
       UPDATE budgets
@@ -594,9 +643,32 @@ async function repairAmbiguousBudgets(
       WHERE ownerKey = ?
         AND id = ?;
       `,
-      [categoryId, now, ownerKey, budget.id]
+      [categoryId, now, ownerKey, source.id]
+    );
+    return;
+  }
+
+  const preferred = preferBudgetRecord(target, source);
+  if (preferred.id === source.id) {
+    await run(
+      `
+      UPDATE budgets
+      SET amountCents = ?, updatedAt = ?
+      WHERE ownerKey = ?
+        AND id = ?;
+      `,
+      [source.amountCents, now, ownerKey, target.id]
     );
   }
+
+  await run(
+    `
+    DELETE FROM budgets
+    WHERE ownerKey = ?
+      AND id = ?;
+    `,
+    [ownerKey, source.id]
+  );
 }
 
 async function inferBudgetCategoryName(
