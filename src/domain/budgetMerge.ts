@@ -35,9 +35,9 @@ export function findMatchingBudgetRecord<T extends BudgetIdentity>(
   records: T[],
   budget: BudgetIdentity
 ): T | undefined {
-  const byId = records.find((record) => record.id === budget.id);
-  if (byId) return byId;
-
   const key = budgetIdentityKey(budget);
-  return records.find((record) => budgetIdentityKey(record) === key);
+  const byKey = records.find((record) => budgetIdentityKey(record) === key);
+  if (byKey) return byKey;
+
+  return records.find((record) => record.id === budget.id);
 }

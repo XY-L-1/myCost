@@ -84,7 +84,7 @@ test("budgetIdentityKey matches the remote unique budget scope", () => {
   );
 });
 
-test("findMatchingBudgetRecord prefers primary-key matches before scope matches", () => {
+test("findMatchingBudgetRecord prefers unique scope matches before id matches", () => {
   const records = [
     {
       id: "same-scope",
@@ -104,7 +104,7 @@ test("findMatchingBudgetRecord prefers primary-key matches before scope matches"
       categoryId: "category-food",
       monthKey: "2026-04",
     }),
-    records[1]
+    records[0]
   );
 });
 

@@ -7,7 +7,7 @@ import {
    RecurringExpenseSchema,
 } from "../types/recurringExpense";
 import { supabase } from "../auth/supabaseClient";
-import { budgetIdentityKey } from "../domain/budgetMerge";
+import { budgetIdentityKey, findMatchingBudgetRecord } from "../domain/budgetMerge";
 import { categoryIdentityKey, preferCategoryRecord } from "../domain/categoryMerge";
 import { normalizeCategoryName } from "../utils/categoryIdentity";
 import { repointCategoryReferences } from "../services/categoryReferenceService";
@@ -993,32 +993,20 @@ function findRemoteBudgetMatch(
    remoteRows: RemoteBudgetRow[],
    budget: Budget
 ): RemoteBudgetRow | undefined {
-   const byId = remoteRows.find((row) => row.id === budget.id);
-   if (byId) return byId;
-
-   const key = budgetKey(budget.categoryId, budget.monthKey);
-   return remoteRows.find((row) => budgetKey(row.category_id, row.month_key) === key);
+   return findMatchingBudgetRecord(
+      remoteRows.map((row) => ({
+         ...row,
+         categoryId: row.category_id,
+         monthKey: row.month_key,
+      })),
+      budget
+   );
 }
 
 async function fetchRemoteBudgetByIdOrKey(
    userId: string,
    budget: Budget
 ): Promise<RemoteBudgetRow | null> {
-   const { data: byId, error: byIdError } = await supabase
-      .from("budgets")
-      .select("id,user_id,category_id,month_key,amount_cents,created_at,updated_at")
-      .eq("user_id", userId)
-      .eq("id", budget.id)
-      .limit(1);
-
-   if (byIdError) {
-      console.error("[SYNC] Failed to fetch budget after conflict", byIdError);
-      throw byIdError;
-   }
-
-   const idMatch = (byId as RemoteBudgetRow[] | null)?.[0];
-   if (idMatch) return idMatch;
-
    const { data: byKey, error: byKeyError } = await supabase
       .from("budgets")
       .select("id,user_id,category_id,month_key,amount_cents,created_at,updated_at")
@@ -1032,7 +1020,22 @@ async function fetchRemoteBudgetByIdOrKey(
       throw byKeyError;
    }
 
-   return (byKey as RemoteBudgetRow[] | null)?.[0] ?? null;
+   const keyMatch = (byKey as RemoteBudgetRow[] | null)?.[0];
+   if (keyMatch) return keyMatch;
+
+   const { data: byId, error: byIdError } = await supabase
+      .from("budgets")
+      .select("id,user_id,category_id,month_key,amount_cents,created_at,updated_at")
+      .eq("user_id", userId)
+      .eq("id", budget.id)
+      .limit(1);
+
+   if (byIdError) {
+      console.error("[SYNC] Failed to fetch budget after conflict", byIdError);
+      throw byIdError;
+   }
+
+   return (byId as RemoteBudgetRow[] | null)?.[0] ?? null;
 }
 
 async function updateRemoteBudgetIfNewer(
@@ -1056,6 +1059,14 @@ async function updateRemoteBudgetIfNewer(
       .eq("user_id", userId);
 
    if (error) {
+      const errorCode = (error as { code?: string }).code;
+      if (errorCode === "23505") {
+         const existing = await fetchRemoteBudgetByIdOrKey(userId, budget);
+         if (existing && existing.id !== remote.id) {
+            await updateRemoteBudgetIfNewer(userId, budget, existing);
+            return;
+         }
+      }
       console.error("[SYNC] Failed to update budget", budget.id, error);
       throw error;
    }
@@ -1096,10 +1107,17 @@ async function findLocalBudgetByIdOrKey(
           id = ?
           OR (categoryId = ? AND monthKey = ?)
         )
-      ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END
+      ORDER BY CASE WHEN categoryId = ? AND monthKey = ? THEN 0 ELSE 1 END
       LIMIT 1;
       `,
-      [userId, budget.id, budget.categoryId, budget.monthKey, budget.id]
+      [
+         userId,
+         budget.id,
+         budget.categoryId,
+         budget.monthKey,
+         budget.categoryId,
+         budget.monthKey,
+      ]
    );
 
    return rows[0] ? BudgetSchema.parse(rows[0]) : null;
