@@ -14,6 +14,7 @@ import { formatMonthKey, shiftMonth } from "../utils/date";
 import { CategoryRepository } from "../repositories/categoryRepository";
 import { BudgetRepository } from "../repositories/budgetRepository";
 import { ExpenseRepository } from "../repositories/expenseRepository";
+import { buildResolvedCategoryBreakdown } from "../domain/categoryResolution";
 import { useSyncGate } from "../state/syncGateContext";
 import { COLORS, FONTS, RADII, SPACING } from "../theme/tokens";
 import { normalizeCategoryName } from "../utils/categoryIdentity";
@@ -37,15 +38,27 @@ export function BudgetScreen() {
   const load = useCallback(async () => {
     if (!scope) return;
 
-    const [categories, budgets, breakdown] = await Promise.all([
+    const [categories, budgets, monthExpenses, displayMap] = await Promise.all([
       CategoryRepository.getAll(scope, { includeArchived: true }),
       BudgetRepository.getByMonth(scope, monthKey),
-      ExpenseRepository.getMonthlyCategoryBreakdown(scope, monthKey),
+      ExpenseRepository.list(scope, { monthKey }),
+      CategoryRepository.getDisplayNameMap(scope),
     ]);
 
     const categoryMap = new Map(categories.map((item) => [item.id, item]));
     const budgetMap = new Map(budgets.map((item) => [item.categoryId, item.amountCents]));
-    const actualMap = new Map(breakdown.map((item) => [item.categoryId, item.total]));
+    const actualBreakdown = buildResolvedCategoryBreakdown(
+      scope,
+      monthExpenses,
+      displayMap,
+      t("common.category")
+    );
+    const actualByCategoryId = new Map(
+      actualBreakdown.map((item) => [item.categoryId, item.total])
+    );
+    const actualByName = new Map(
+      actualBreakdown.map((item) => [normalizeCategoryName(item.name), item.total])
+    );
     const categoryIds = new Set<string>();
 
     categories
@@ -68,7 +81,8 @@ export function BudgetScreen() {
         : t("common.category");
       const existing = groupedRows.get(normalizedKey);
       const nextBudget = budgetMap.get(categoryId) ?? 0;
-      const nextActual = actualMap.get(categoryId) ?? 0;
+      const nextActual =
+        actualByName.get(normalizedKey) ?? actualByCategoryId.get(categoryId) ?? 0;
 
       if (!existing) {
         groupedRows.set(normalizedKey, {

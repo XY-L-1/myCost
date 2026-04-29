@@ -13,6 +13,10 @@ import { useCurrentScope } from "../hooks/useCurrentScope";
 import { useFormatters } from "../hooks/useFormatters";
 import { ExpenseRepository } from "../repositories/expenseRepository";
 import { CategoryRepository } from "../repositories/categoryRepository";
+import {
+  filterExpensesByResolvedCategory,
+  resolveExpenseCategoryName,
+} from "../domain/categoryResolution";
 import { RootStackParamList } from "../navigation/RootNavigator";
 import { useSyncGate } from "../state/syncGateContext";
 import { COLORS, FONTS, RADII, SPACING } from "../theme/tokens";
@@ -43,12 +47,21 @@ export function ExpenseListScreen() {
     ]);
     const expenseRows = await ExpenseRepository.list(scope, {
       monthKey: selectedMonth ?? undefined,
-      categoryId: selectedCategoryId === "all" ? undefined : selectedCategoryId,
       search,
     });
+    const visibleExpenseRows =
+      selectedCategoryId === "all"
+        ? expenseRows
+        : filterExpensesByResolvedCategory(
+            scope,
+            expenseRows,
+            displayMap,
+            selectedCategoryId,
+            t("common.category")
+          );
 
     setMonthKeys(monthRows);
-    setExpenses(expenseRows);
+    setExpenses(visibleExpenseRows);
     setFilterCategories(categoryRows.map((item) => ({ id: item.id, name: item.name })));
     setDisplayCategoryMap(displayMap);
     if (
@@ -57,7 +70,7 @@ export function ExpenseListScreen() {
     ) {
       setSelectedCategoryId("all");
     }
-  }, [scope, search, selectedCategoryId, selectedMonth]);
+  }, [scope, search, selectedCategoryId, selectedMonth, t]);
 
   useEffect(() => {
     load();
@@ -165,23 +178,30 @@ export function ExpenseListScreen() {
           body={t("transactions.emptyBody")}
         />
       ) : (
-        expenses.map((expense) => (
-          <AppCard key={expense.id} style={styles.row}>
-            <Pressable
-              onPress={() => navigation.navigate("ExpenseEditor", { expenseId: expense.id })}
-            >
-              <Text style={styles.rowTitle}>
-                {expense.description?.trim() || displayCategoryMap.get(expense.categoryId)}
-              </Text>
-              <Text style={styles.rowMeta}>
-                {(displayCategoryMap.get(expense.categoryId) ?? t("common.category"))} · {formatDate(expense.expenseDate)}
-              </Text>
-              <Text style={styles.rowAmount}>
-                {formatCurrency(expense.amountCents, expense.currency)}
-              </Text>
-            </Pressable>
-          </AppCard>
-        ))
+        expenses.map((expense) => {
+          const categoryName = resolveExpenseCategoryName(
+            expense,
+            displayCategoryMap.get(expense.categoryId),
+            t("common.category")
+          );
+          return (
+            <AppCard key={expense.id} style={styles.row}>
+              <Pressable
+                onPress={() => navigation.navigate("ExpenseEditor", { expenseId: expense.id })}
+              >
+                <Text style={styles.rowTitle}>
+                  {expense.description?.trim() || categoryName}
+                </Text>
+                <Text style={styles.rowMeta}>
+                  {categoryName} · {formatDate(expense.expenseDate)}
+                </Text>
+                <Text style={styles.rowAmount}>
+                  {formatCurrency(expense.amountCents, expense.currency)}
+                </Text>
+              </Pressable>
+            </AppCard>
+          );
+        })
       )}
     </AppScreen>
   );

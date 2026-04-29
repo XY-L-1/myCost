@@ -13,8 +13,10 @@
     "src/domain/budgetMerge.ts",
     "src/domain/categoryInference.ts",
     "src/domain/categoryMerge.ts",
+    "src/domain/categoryResolution.ts",
     "src/domain/dataScope.ts",
     "src/domain/expenseMutations.ts",
+    "src/utils/categoryIdentity.ts",
     "src/utils/date.ts",
     "src/types/expense.ts"
   ]

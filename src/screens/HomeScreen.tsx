@@ -17,6 +17,7 @@ import { ExpenseRepository } from "../repositories/expenseRepository";
 import { BudgetRepository } from "../repositories/budgetRepository";
 import { CategoryRepository } from "../repositories/categoryRepository";
 import { RecurringExpenseRepository } from "../repositories/recurringExpenseRepository";
+import { resolveExpenseCategoryName } from "../domain/categoryResolution";
 import { RootStackParamList } from "../navigation/RootNavigator";
 import { useAuthGate } from "../state/authGateContext";
 import { useSyncGate } from "../state/syncGateContext";
@@ -151,26 +152,32 @@ export function HomeScreen() {
         {recentExpenses.length === 0 ? (
           <EmptyState title={t("home.latestTransactions")} body={t("home.noTransactions")} />
         ) : (
-          recentExpenses.map((expense) => (
-            <Pressable
-              key={expense.id}
-              onPress={() => navigation.navigate("ExpenseEditor", { expenseId: expense.id })}
-              style={styles.expenseRow}
-            >
-              <View style={styles.expenseInfo}>
-                <Text style={styles.expenseTitle}>
-                  {expense.description?.trim() || categories.get(expense.categoryId) || t("common.noData")}
+          recentExpenses.map((expense) => {
+            const categoryName = resolveExpenseCategoryName(
+              expense,
+              categories.get(expense.categoryId),
+              t("common.category")
+            );
+            return (
+              <Pressable
+                key={expense.id}
+                onPress={() => navigation.navigate("ExpenseEditor", { expenseId: expense.id })}
+                style={styles.expenseRow}
+              >
+                <View style={styles.expenseInfo}>
+                  <Text style={styles.expenseTitle}>
+                    {expense.description?.trim() || categoryName || t("common.noData")}
+                  </Text>
+                  <Text style={styles.expenseMeta}>
+                    {categoryName} · {formatDate(expense.expenseDate)}
+                  </Text>
+                </View>
+                <Text style={styles.expenseAmount}>
+                  {formatCurrency(expense.amountCents, expense.currency)}
                 </Text>
-                <Text style={styles.expenseMeta}>
-                  {(categories.get(expense.categoryId) ?? t("common.category"))} ·{" "}
-                  {formatDate(expense.expenseDate)}
-                </Text>
-              </View>
-              <Text style={styles.expenseAmount}>
-                {formatCurrency(expense.amountCents, expense.currency)}
-              </Text>
-            </Pressable>
-          ))
+              </Pressable>
+            );
+          })
         )}
       </AppCard>
     </AppScreen>

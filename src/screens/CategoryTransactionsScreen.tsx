@@ -10,6 +10,10 @@ import { useCurrentScope } from "../hooks/useCurrentScope";
 import { useFormatters } from "../hooks/useFormatters";
 import { ExpenseRepository } from "../repositories/expenseRepository";
 import { CategoryRepository } from "../repositories/categoryRepository";
+import {
+  filterExpensesByResolvedCategory,
+  resolveExpenseCategoryName,
+} from "../domain/categoryResolution";
 import { RootStackParamList } from "../navigation/RootNavigator";
 import { COLORS, FONTS, SPACING } from "../theme/tokens";
 
@@ -24,14 +28,28 @@ export function CategoryTransactionsScreen({ navigation, route }: Props) {
 
   const load = useCallback(async () => {
     if (!scope) return;
-    const [category, rows] = await Promise.all([
+    const [category, categoryMap, monthRows] = await Promise.all([
       CategoryRepository.getCanonicalByIdInScope(scope, route.params.categoryId),
+      CategoryRepository.getDisplayNameMap(scope),
       ExpenseRepository.list(scope, {
         monthKey: route.params.monthKey,
-        categoryId: route.params.categoryId,
       }),
     ]);
-    setCategoryName(category?.name ?? t("common.category"));
+    const rows = filterExpensesByResolvedCategory(
+      scope,
+      monthRows,
+      categoryMap,
+      route.params.categoryId,
+      t("common.category")
+    );
+    const resolvedName = rows[0]
+      ? resolveExpenseCategoryName(
+          rows[0],
+          categoryMap.get(rows[0].categoryId),
+          category?.name ?? t("common.category")
+        )
+      : category?.name ?? t("common.category");
+    setCategoryName(resolvedName);
     setExpenses(rows);
   }, [route.params.categoryId, route.params.monthKey, scope, t]);
 

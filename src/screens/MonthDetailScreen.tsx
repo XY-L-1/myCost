@@ -10,6 +10,7 @@ import { useCurrentScope } from "../hooks/useCurrentScope";
 import { useFormatters } from "../hooks/useFormatters";
 import { ExpenseRepository } from "../repositories/expenseRepository";
 import { CategoryRepository } from "../repositories/categoryRepository";
+import { buildResolvedCategoryBreakdown } from "../domain/categoryResolution";
 import { RootStackParamList } from "../navigation/RootNavigator";
 import { COLORS, FONTS, SPACING } from "../theme/tokens";
 
@@ -25,17 +26,18 @@ export function MonthDetailScreen({ navigation, route }: Props) {
 
   const load = useCallback(async () => {
     if (!scope) return;
-    const [categoryMap, breakdown] = await Promise.all([
+    const [categoryMap, expenses] = await Promise.all([
       CategoryRepository.getDisplayNameMap(scope),
-      ExpenseRepository.getMonthlyCategoryBreakdown(scope, route.params.monthKey),
+      ExpenseRepository.list(scope, { monthKey: route.params.monthKey }),
     ]);
 
     setRows(
-      breakdown.map((item) => ({
-        categoryId: item.categoryId,
-        name: categoryMap.get(item.categoryId) ?? t("common.category"),
-        total: item.total,
-      }))
+      buildResolvedCategoryBreakdown(
+        scope,
+        expenses,
+        categoryMap,
+        t("common.category")
+      )
     );
   }, [route.params.monthKey, scope, t]);
 

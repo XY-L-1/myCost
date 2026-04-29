@@ -11,6 +11,7 @@ import { useCurrentScope } from "../hooks/useCurrentScope";
 import { useFormatters } from "../hooks/useFormatters";
 import { ExpenseRepository } from "../repositories/expenseRepository";
 import { CategoryRepository } from "../repositories/categoryRepository";
+import { buildResolvedCategoryBreakdown } from "../domain/categoryResolution";
 import { RootStackParamList } from "../navigation/RootNavigator";
 import { useSyncGate } from "../state/syncGateContext";
 import { COLORS, FONTS, SPACING } from "../theme/tokens";
@@ -44,20 +45,21 @@ export function MonthlySummaryScreen() {
       return;
     }
 
-    const [categoryMap, monthTotal, categoryBreakdown] = await Promise.all([
+    const [categoryMap, monthTotal, monthExpenses] = await Promise.all([
       CategoryRepository.getDisplayNameMap(scope),
       ExpenseRepository.getMonthlyTotal(scope, monthKey),
-      ExpenseRepository.getMonthlyCategoryBreakdown(scope, monthKey),
+      ExpenseRepository.list(scope, { monthKey }),
     ]);
 
     setSelectedMonth(monthKey);
     setTotal(monthTotal);
     setBreakdown(
-      categoryBreakdown.map((item) => ({
-        categoryId: item.categoryId,
-        name: categoryMap.get(item.categoryId) ?? t("common.category"),
-        total: item.total,
-      }))
+      buildResolvedCategoryBreakdown(
+        scope,
+        monthExpenses,
+        categoryMap,
+        t("common.category")
+      )
     );
   }, [scope, selectedMonth, t]);
 
