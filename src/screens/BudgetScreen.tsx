@@ -14,7 +14,10 @@ import { formatMonthKey, shiftMonth } from "../utils/date";
 import { CategoryRepository } from "../repositories/categoryRepository";
 import { BudgetRepository } from "../repositories/budgetRepository";
 import { ExpenseRepository } from "../repositories/expenseRepository";
-import { buildResolvedCategoryBreakdown } from "../domain/categoryResolution";
+import {
+  buildResolvedCategoryBreakdown,
+  isEmptyFallbackCategory,
+} from "../domain/categoryResolution";
 import { useSyncGate } from "../state/syncGateContext";
 import { COLORS, FONTS, RADII, SPACING } from "../theme/tokens";
 import { normalizeCategoryName } from "../utils/categoryIdentity";
@@ -83,6 +86,10 @@ export function BudgetScreen() {
       const nextBudget = budgetMap.get(categoryId) ?? 0;
       const nextActual =
         actualByName.get(normalizedKey) ?? actualByCategoryId.get(categoryId) ?? 0;
+
+      if (isEmptyFallbackCategory(name, t("common.category"), nextBudget, nextActual)) {
+        return;
+      }
 
       if (!existing) {
         groupedRows.set(normalizedKey, {

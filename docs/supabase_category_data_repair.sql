@@ -338,3 +338,35 @@ where e.id = updates.expense_id
 -- Supabase SQL Editor shows the update row count above.
 
 commit;
+
+-- 4. Optional cleanup: archive empty active "Category" placeholder rows.
+-- Run this after section 3 if Budget still shows a zero-dollar "Category" row.
+-- This does not touch the real "Other" category.
+
+update public.categories c
+set
+  deleted_at = to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+  updated_at = to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+where c.deleted_at is null
+  and lower(trim(c.name)) = 'category'
+  and not exists (
+    select 1
+    from public.expenses e
+    where e.user_id = c.user_id
+      and e.category_id = c.id
+      and e.deleted_at is null
+  )
+  and not exists (
+    select 1
+    from public.budgets b
+    where b.user_id = c.user_id
+      and b.category_id = c.id
+      and b.amount_cents <> 0
+  )
+  and not exists (
+    select 1
+    from public.recurring_expenses r
+    where r.user_id = c.user_id
+      and r.category_id = c.id
+      and r.is_active = 1
+  );

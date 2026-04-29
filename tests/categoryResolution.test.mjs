@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildResolvedCategoryBreakdown,
   filterExpensesByResolvedCategory,
+  isEmptyFallbackCategory,
   resolveExpenseCategoryName,
 } from "../.test-dist/src/domain/categoryResolution.js";
 import { deterministicCategoryId } from "../.test-dist/src/utils/categoryIdentity.js";
@@ -78,4 +79,12 @@ test("filterExpensesByResolvedCategory includes inferred placeholder rows", () =
     ),
     [rows[0]]
   );
+});
+
+test("isEmptyFallbackCategory only hides empty fallback placeholder rows", () => {
+  assert.equal(isEmptyFallbackCategory("Category", "Category", 0, 0), true);
+  assert.equal(isEmptyFallbackCategory("Category", "Category", 1000, 0), false);
+  assert.equal(isEmptyFallbackCategory("Category", "Category", 0, 1000), false);
+  assert.equal(isEmptyFallbackCategory("Other", "Category", 0, 0), false);
+  assert.equal(isEmptyFallbackCategory("Food", "Category", 0, 0), false);
 });

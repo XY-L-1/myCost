@@ -44,6 +44,19 @@ export function isPlaceholderCategoryName(name: string | null | undefined): bool
   return normalized === "category" || normalized === "other";
 }
 
+export function isEmptyFallbackCategory(
+  name: string,
+  fallbackName: string,
+  budgetCents: number,
+  actualCents: number
+): boolean {
+  return (
+    normalizeCategoryName(name) === normalizeCategoryName(fallbackName) &&
+    budgetCents === 0 &&
+    actualCents === 0
+  );
+}
+
 export function resolveExpenseCategory(
   scope: DataScope,
   expense: Pick<CategorizedExpense, "categoryId" | "description">,
