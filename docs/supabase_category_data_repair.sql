@@ -345,8 +345,8 @@ commit;
 
 update public.categories c
 set
-  deleted_at = to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
-  updated_at = to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+  deleted_at = now(),
+  updated_at = now()
 where c.deleted_at is null
   and lower(trim(c.name)) = 'category'
   and not exists (
