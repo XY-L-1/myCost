@@ -1124,6 +1124,12 @@ async function findLocalBudgetByIdOrKey(
 }
 
 async function insertLocalBudget(budget: Budget): Promise<void> {
+   const existing = await findLocalBudgetByIdOrKey(budget.ownerKey, budget);
+   if (existing) {
+      await updateLocalBudget(existing.id, budget);
+      return;
+   }
+
    await run(
       `
       INSERT INTO budgets (
@@ -1147,6 +1153,29 @@ async function updateLocalBudget(
    localId: string,
    budget: Budget
 ): Promise<void> {
+   const conflicts = await query<{ id: string }>(
+      `
+      SELECT id
+      FROM budgets
+      WHERE ownerKey = ?
+        AND categoryId = ?
+        AND monthKey = ?
+        AND id != ?;
+      `,
+      [budget.ownerKey, budget.categoryId, budget.monthKey, localId]
+   );
+
+   for (const conflict of conflicts) {
+      await run(
+         `
+         DELETE FROM budgets
+         WHERE ownerKey = ?
+           AND id = ?;
+         `,
+         [budget.ownerKey, conflict.id]
+      );
+   }
+
    await run(
       `
       UPDATE budgets
