@@ -189,25 +189,31 @@ export function useAppRuntime() {
   }, [auth.user?.id, categoriesStatus]);
 
   useEffect(() => {
-    if (!auth.user?.id || categoriesStatus !== "ready") {
+    const userId = auth.user?.id;
+    if (!userId || categoriesStatus !== "ready") {
       return;
     }
 
     const intervalId = setInterval(async () => {
       if (syncInFlightRef.current) return;
+      syncInFlightRef.current = true;
 
       try {
         setSyncStatus("syncing");
-        await pullRemoteCategories(auth.user!.id);
-        await pullRemoteExpenses(auth.user!.id);
-        await pullRemoteBudgets(auth.user!.id);
-        await pullRemoteRecurringExpenses(auth.user!.id);
+        setSyncMessage(null);
+        await pullRemoteCategories(userId);
+        await pullRemoteExpenses(userId);
+        await pullRemoteBudgets(userId);
+        await pullRemoteRecurringExpenses(userId);
         setSyncStatus("ready");
         setLastSyncAt(new Date().toISOString());
         setCategoriesRevision((value) => value + 1);
       } catch (error) {
         console.error("[APP] background pull failed", error);
         setSyncStatus("error");
+        setSyncMessage((error as Error).message ?? "errors.backgroundSyncFailed");
+      } finally {
+        syncInFlightRef.current = false;
       }
     }, 5 * 60 * 1000);
 
