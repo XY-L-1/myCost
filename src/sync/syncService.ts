@@ -9,6 +9,7 @@ import {
 import { supabase } from "../auth/supabaseClient";
 import { budgetIdentityKey, findMatchingBudgetRecord } from "../domain/budgetMerge";
 import { categoryIdentityKey, preferCategoryRecord } from "../domain/categoryMerge";
+import { buildCategoryAliasMap } from "../domain/categoryAlias";
 import { normalizeCategoryName } from "../utils/categoryIdentity";
 import { repointCategoryReferences } from "../services/categoryReferenceService";
 
@@ -46,6 +47,15 @@ type RemoteCategoryNameRow = {
    budget?: number | string | null;
    deleted_at: string | null;
    normalized_name?: string | null;
+};
+
+type RemoteCategoryAliasRow = {
+   id: string;
+   name: string;
+   normalized_name?: string | null;
+   deleted_at: string | null;
+   created_at: string;
+   updated_at: string;
 };
 
 type RemoteBudgetRow = {
@@ -299,7 +309,11 @@ export async function pullRemoteExpenses(userId: string): Promise<void> {
       to += pageSize;
    }
 
-   await applyRemoteChanges(userId, remoteRows);
+   const categoryAliases = await fetchRemoteCategoryAliasMap(userId);
+   await applyRemoteChanges(
+      userId,
+      remoteRows.map((row) => applyRemoteCategoryAlias(row, categoryAliases))
+   );
 }
 
 /**
@@ -374,12 +388,24 @@ export async function pullRemoteBudgets(userId: string): Promise<void> {
       to += pageSize;
    }
 
-   await applyRemoteBudgetChanges(userId, remoteRows);
+   const categoryAliases = await fetchRemoteCategoryAliasMap(userId);
+   await applyRemoteBudgetChanges(
+      userId,
+      remoteRows.map((row) => applyRemoteCategoryAlias(row, categoryAliases))
+   );
 }
 
 export async function pushLocalBudgets(userId: string): Promise<void> {
    const localBudgets = await query<Budget>(
-      `SELECT * FROM budgets WHERE userId = ?;`,
+      `
+      SELECT budgets.*
+      FROM budgets
+      INNER JOIN categories
+        ON categories.ownerKey = budgets.ownerKey
+       AND categories.id = budgets.categoryId
+       AND categories.deletedAt IS NULL
+      WHERE budgets.userId = ?;
+      `,
       [userId]
    );
 
@@ -449,7 +475,11 @@ export async function pullRemoteRecurringExpenses(userId: string): Promise<void>
       to += pageSize;
    }
 
-   await applyRemoteRecurringExpenseChanges(userId, remoteRows);
+   const categoryAliases = await fetchRemoteCategoryAliasMap(userId);
+   await applyRemoteRecurringExpenseChanges(
+      userId,
+      remoteRows.map((row) => applyRemoteCategoryAlias(row, categoryAliases))
+   );
 }
 
 export async function pushLocalRecurringExpenses(userId: string): Promise<void> {
@@ -915,6 +945,53 @@ async function fetchRemoteCategoryNameMap(
    });
 
    return map;
+}
+
+async function fetchRemoteCategoryAliasMap(userId: string): Promise<Map<string, string>> {
+   const pageSize = 500;
+   let from = 0;
+   let to = pageSize - 1;
+   const rows: RemoteCategoryAliasRow[] = [];
+
+   while (true) {
+      const { data, error } = await supabase
+         .from("categories")
+         .select("id,name,normalized_name,deleted_at,created_at,updated_at")
+         .eq("user_id", userId)
+         .range(from, to);
+
+      if (error) {
+         console.error("[SYNC] Failed to pull category aliases", error);
+         throw error;
+      }
+
+      if (!data || data.length === 0) break;
+
+      rows.push(...(data as RemoteCategoryAliasRow[]));
+      if (data.length < pageSize) break;
+
+      from += pageSize;
+      to += pageSize;
+   }
+
+   return buildCategoryAliasMap(
+      rows.map((row) => ({
+         id: row.id,
+         name: row.name,
+         normalizedName: row.normalized_name,
+         deletedAt: row.deleted_at,
+         createdAt: row.created_at,
+         updatedAt: row.updated_at,
+      }))
+   );
+}
+
+function applyRemoteCategoryAlias<T extends { category_id: string }>(
+   row: T,
+   aliases: Map<string, string>
+): T {
+   const categoryId = aliases.get(row.category_id) ?? row.category_id;
+   return categoryId === row.category_id ? row : { ...row, category_id: categoryId };
 }
 
 async function fetchRemoteCategoryByNormalized(

@@ -1,6 +1,6 @@
-import { query, queryFirst, run } from "../db/database";
+import { query, run } from "../db/database";
 import { preferBudgetRecord } from "../domain/budgetMerge";
-import { Category, CategorySchema } from "../types/category";
+import { Category } from "../types/category";
 import { DataScope, GUEST_OWNER_KEY } from "../domain/dataScope";
 import {
   DEFAULT_CATEGORIES,
@@ -44,68 +44,14 @@ export async function repairLocalCategoryDuplicates(
   });
 
   const now = new Date().toISOString();
+  const referenceCounts = await getCategoryReferenceCounts(ownerKey);
 
   for (const [normalized, group] of groups.entries()) {
     const defaultName = defaultsByNorm.get(normalized);
-    const canonicalId = defaultName
-      ? scope.userId
-        ? deterministicCategoryId(scope.userId, defaultName)
-        : deterministicGuestCategoryId(defaultName)
-      : null;
-    const sortedGroup = group.slice().sort((a, b) => {
-      const activeRank = Number(!!a.deletedAt) - Number(!!b.deletedAt);
-      if (activeRank !== 0) return activeRank;
-      return a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id);
-    });
-    let canonicalRow = canonicalId
-      ? group.find((item) => item.id === canonicalId) ?? null
-      : null;
-    canonicalRow ??= sortedGroup[0] ?? null;
+    let canonicalRow = selectCanonicalCategory(group, referenceCounts);
 
     if (!canonicalRow) {
       continue;
-    }
-
-    if (canonicalId && canonicalRow.id !== canonicalId) {
-      const globalConflict = await queryFirst<Category>(
-        `
-        SELECT *
-        FROM categories
-        WHERE id = ?;
-        `,
-        [canonicalId]
-      );
-
-      if (globalConflict && globalConflict.ownerKey === ownerKey) {
-        canonicalRow = CategorySchema.parse(globalConflict);
-      } else if (!globalConflict) {
-        const canonicalDefaultName = defaultName!;
-        await run(
-          `
-          UPDATE categories
-          SET id = ?, name = ?, normalizedName = ?, updatedAt = ?, dirty = 1, version = version + 1
-          WHERE ownerKey = ?
-            AND id = ?;
-          `,
-          [
-            canonicalId,
-            canonicalDefaultName,
-            normalized,
-            now,
-            ownerKey,
-            canonicalRow.id,
-          ]
-        );
-        canonicalRow = {
-          ...canonicalRow,
-          id: canonicalId,
-          name: canonicalDefaultName,
-          normalizedName: normalized,
-          updatedAt: now,
-          dirty: 1,
-          version: canonicalRow.version + 1,
-        };
-      }
     }
 
     const shouldBeActive = !!defaultName || group.some((item) => !item.deletedAt);
@@ -789,5 +735,48 @@ async function deleteCategories(ownerKey: string, categoryIds: string[]) {
       AND id IN (${placeholders});
     `,
     [ownerKey, ...categoryIds]
+  );
+}
+
+async function getCategoryReferenceCounts(ownerKey: string): Promise<Map<string, number>> {
+  const rows = await query<{ categoryId: string; count: number }>(
+    `
+    SELECT categoryId, COUNT(*) as count
+    FROM (
+      SELECT categoryId FROM expenses WHERE ownerKey = ?
+      UNION ALL
+      SELECT categoryId FROM budgets WHERE ownerKey = ?
+      UNION ALL
+      SELECT categoryId FROM recurring_expenses WHERE ownerKey = ?
+    )
+    GROUP BY categoryId;
+    `,
+    [ownerKey, ownerKey, ownerKey]
+  );
+
+  return new Map(rows.map((row) => [row.categoryId, row.count]));
+}
+
+function selectCanonicalCategory(
+  categories: Category[],
+  referenceCounts: Map<string, number>
+): Category | null {
+  return (
+    categories.slice().sort((a, b) => {
+      const activeRank = Number(!!a.deletedAt) - Number(!!b.deletedAt);
+      if (activeRank !== 0) return activeRank;
+
+      const referenceRank =
+        (referenceCounts.get(b.id) ?? 0) - (referenceCounts.get(a.id) ?? 0);
+      if (referenceRank !== 0) return referenceRank;
+
+      const dirtyRank = (a.dirty ?? 0) - (b.dirty ?? 0);
+      if (dirtyRank !== 0) return dirtyRank;
+
+      const createdRank = a.createdAt.localeCompare(b.createdAt);
+      if (createdRank !== 0) return createdRank;
+
+      return a.id.localeCompare(b.id);
+    })[0] ?? null
   );
 }

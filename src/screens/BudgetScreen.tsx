@@ -67,7 +67,11 @@ export function BudgetScreen() {
     categories
       .filter((category) => !category.deletedAt)
       .forEach((category) => categoryIds.add(category.id));
-    budgets.forEach((budget) => categoryIds.add(budget.categoryId));
+    budgets.forEach((budget) => {
+      if (categoryMap.has(budget.categoryId)) {
+        categoryIds.add(budget.categoryId);
+      }
+    });
 
     const groupedRows = new Map<string, BudgetRow>();
 
