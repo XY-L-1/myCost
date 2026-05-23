@@ -1,4 +1,4 @@
-import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import {
   createBottomTabNavigator,
   BottomTabBarProps,
@@ -17,6 +17,7 @@ import { CategoryManagementScreen } from "../screens/CategoryManagementScreen";
 import { RecurringExpensesScreen } from "../screens/RecurringExpensesScreen";
 import { COLORS, FONTS, RADII } from "../theme/tokens";
 import { useI18n } from "../i18n/i18n";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export type RootTabParamList = {
   HomeTab: undefined;
@@ -40,6 +41,8 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 function AppTabBar({ state, navigation }: BottomTabBarProps) {
   const { t } = useI18n();
+  const insets = useSafeAreaInsets();
+  const bottomInset = Math.max(insets.bottom, 12);
   const labels: Record<keyof RootTabParamList, string> = {
     HomeTab: t("nav.home"),
     TransactionsTab: t("nav.transactions"),
@@ -49,7 +52,7 @@ function AppTabBar({ state, navigation }: BottomTabBarProps) {
   };
 
   return (
-    <View style={styles.tabBar}>
+    <View style={[styles.tabBar, { paddingBottom: bottomInset }]}>
       {state.routes.map((route, index) => {
         const selected = index === state.index;
         return (
@@ -115,12 +118,13 @@ export function RootNavigator() {
 const styles = StyleSheet.create({
   tabBar: {
     flexDirection: "row",
+    flexShrink: 0,
     backgroundColor: COLORS.surface,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
     paddingHorizontal: 8,
     paddingTop: 10,
-    paddingBottom: Platform.OS === "ios" ? 24 : 14,
+    zIndex: 10,
   },
   tabButton: {
     flex: 1,

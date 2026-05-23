@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavigationContainer } from "@react-navigation/native";
 import { Text, View, StyleSheet } from "react-native";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AuthGateProvider } from "./src/state/authGateContext";
 import { SyncGateProvider } from "./src/state/syncGateContext";
 import { RootNavigator } from "./src/navigation/RootNavigator";
@@ -120,7 +121,11 @@ function AppShell({
 }
 
 export default function App() {
-  return <AppContent />;
+  return (
+    <SafeAreaProvider>
+      <AppContent />
+    </SafeAreaProvider>
+  );
 }
 
 function resolveAuthInitialRoute(target: AuthEntryTarget) {

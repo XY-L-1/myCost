@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import { Platform, ScrollView, StyleSheet, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { COLORS, SPACING } from "../theme/tokens";
 
 export function AppScreen({
@@ -10,15 +10,27 @@ export function AppScreen({
   children: ReactNode;
   scroll?: boolean;
 }) {
+  const insets = useSafeAreaInsets();
+  const contentBottomPadding = SPACING.xl + insets.bottom;
+  const scrollBottomPadding = contentBottomPadding + 72;
   const content = scroll ? (
     <ScrollView
+      style={styles.scroll}
       showsVerticalScrollIndicator={false}
-      contentContainerStyle={[styles.scrollContent, styles.webContent]}
+      contentContainerStyle={[
+        styles.scrollContent,
+        styles.webContent,
+        { paddingBottom: scrollBottomPadding },
+      ]}
     >
       {children}
     </ScrollView>
   ) : (
-    <View style={[styles.content, styles.webContent]}>{children}</View>
+    <View
+      style={[styles.content, styles.webContent, { paddingBottom: contentBottomPadding }]}
+    >
+      {children}
+    </View>
   );
 
   return (
@@ -33,14 +45,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
   },
+  scroll: {
+    flex: 1,
+  },
   content: {
     flex: 1,
     paddingHorizontal: SPACING.lg,
-    paddingBottom: SPACING.xl,
   },
   scrollContent: {
     paddingHorizontal: SPACING.lg,
-    paddingBottom: SPACING.xl,
   },
   webContent: Platform.select({
     web: {
