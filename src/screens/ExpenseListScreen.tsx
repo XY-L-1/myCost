@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import Svg, { Circle, Line } from "react-native-svg";
 import { AppScreen } from "../components/AppScreen";
 import { ScreenHeader } from "../components/ScreenHeader";
 import { AppCard } from "../components/AppCard";
 import { AppButton } from "../components/AppButton";
-import { AppInput } from "../components/AppInput";
 import { EmptyState } from "../components/EmptyState";
 import { useI18n } from "../i18n/i18n";
 import { useCurrentScope } from "../hooks/useCurrentScope";
@@ -102,75 +109,139 @@ export function ExpenseListScreen() {
         }
       />
 
-      <AppInput
-        label={t("common.search")}
-        value={search}
-        onChangeText={setSearch}
-        placeholder={t("common.search")}
-      />
+      <View style={styles.searchField}>
+        <Svg width={18} height={18} viewBox="0 0 20 20">
+          <Circle
+            cx={8.5}
+            cy={8.5}
+            r={5}
+            fill="none"
+            stroke={COLORS.textMuted}
+            strokeWidth={1.7}
+          />
+          <Line
+            x1={12.3}
+            y1={12.3}
+            x2={16.5}
+            y2={16.5}
+            stroke={COLORS.textMuted}
+            strokeWidth={1.7}
+            strokeLinecap="round"
+          />
+        </Svg>
+        <TextInput
+          accessibilityLabel={t("common.search")}
+          value={search}
+          onChangeText={setSearch}
+          placeholder={t("common.search")}
+          placeholderTextColor={COLORS.textMuted}
+          style={styles.searchInput}
+        />
+      </View>
 
-      <Text style={styles.filterLabel}>{t("transactions.month")}</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filters}>
-        <Pressable
-          onPress={() => setSelectedMonth(null)}
-          style={[
-            styles.chip,
-            !selectedMonth && styles.chipSelected,
-          ]}
+      <View style={styles.filterGroup}>
+        <Text style={styles.filterLabel}>{t("transactions.month")}</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterContent}
         >
-          <Text style={[styles.chipText, !selectedMonth && styles.chipTextSelected]}>
-            {t("transactions.allDates")}
-          </Text>
-        </Pressable>
-        {monthKeys.map((monthKey) => {
-          const selected = selectedMonth === monthKey;
-          return (
-            <Pressable
-              key={monthKey}
-              onPress={() => setSelectedMonth(monthKey)}
-              style={[styles.chip, selected && styles.chipSelected]}
-            >
-              <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
-                {formatMonth(monthKey)}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-
-      <Text style={styles.filterLabel}>{t("common.category")}</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filters}>
-        <Pressable
-          onPress={() => setSelectedCategoryId("all")}
-          style={[
-            styles.chip,
-            selectedCategoryId === "all" && styles.chipSelected,
-          ]}
-        >
-          <Text
-            style={[
-              styles.chipText,
-              selectedCategoryId === "all" && styles.chipTextSelected,
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setSelectedMonth(null)}
+            style={({ pressed }) => [
+              styles.chip,
+              !selectedMonth && styles.chipSelected,
+              pressed && styles.pressed,
             ]}
           >
-            {t("common.all")}
-          </Text>
-        </Pressable>
-        {categoryEntries.map(([id, name]) => {
-          const selected = selectedCategoryId === id;
-          return (
-            <Pressable
-              key={id}
-              onPress={() => setSelectedCategoryId(id)}
-              style={[styles.chip, selected && styles.chipSelected]}
+            <Text
+              style={[
+                styles.chipText,
+                !selectedMonth && styles.chipTextSelected,
+              ]}
             >
-              <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
-                {name}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
+              {t("transactions.allDates")}
+            </Text>
+          </Pressable>
+          {monthKeys.map((monthKey) => {
+            const selected = selectedMonth === monthKey;
+            return (
+              <Pressable
+                key={monthKey}
+                accessibilityRole="button"
+                onPress={() => setSelectedMonth(monthKey)}
+                style={({ pressed }) => [
+                  styles.chip,
+                  selected && styles.chipSelected,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.chipText,
+                    selected && styles.chipTextSelected,
+                  ]}
+                >
+                  {formatMonth(monthKey)}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      <View style={styles.filterGroup}>
+        <Text style={styles.filterLabel}>{t("common.category")}</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterContent}
+        >
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setSelectedCategoryId("all")}
+            style={({ pressed }) => [
+              styles.chip,
+              selectedCategoryId === "all" && styles.chipSelected,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text
+              style={[
+                styles.chipText,
+                selectedCategoryId === "all" && styles.chipTextSelected,
+              ]}
+            >
+              {t("common.all")}
+            </Text>
+          </Pressable>
+          {categoryEntries.map(([id, name]) => {
+            const selected = selectedCategoryId === id;
+            return (
+              <Pressable
+                key={id}
+                accessibilityRole="button"
+                onPress={() => setSelectedCategoryId(id)}
+                style={({ pressed }) => [
+                  styles.chip,
+                  selected && styles.chipSelected,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.chipText,
+                    selected && styles.chipTextSelected,
+                  ]}
+                >
+                  {name}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
 
       {expenses.length === 0 ? (
         <EmptyState
@@ -178,52 +249,85 @@ export function ExpenseListScreen() {
           body={t("transactions.emptyBody")}
         />
       ) : (
-        expenses.map((expense) => {
-          const categoryName = resolveExpenseCategoryName(
-            expense,
-            displayCategoryMap.get(expense.categoryId),
-            t("common.category")
-          );
-          return (
-            <AppCard key={expense.id} style={styles.row}>
+        <AppCard style={styles.listCard}>
+          {expenses.map((expense, index) => {
+            const categoryName = resolveExpenseCategoryName(
+              expense,
+              displayCategoryMap.get(expense.categoryId),
+              t("common.category")
+            );
+            return (
               <Pressable
+                key={expense.id}
+                accessibilityRole="button"
                 onPress={() => navigation.navigate("ExpenseEditor", { expenseId: expense.id })}
+                style={({ pressed }) => [
+                  styles.row,
+                  index > 0 && styles.rowBorder,
+                  pressed && styles.pressed,
+                ]}
               >
-                <Text style={styles.rowTitle}>
-                  {expense.description?.trim() || categoryName}
-                </Text>
-                <Text style={styles.rowMeta}>
-                  {categoryName} · {formatDate(expense.expenseDate)}
-                </Text>
+                <View style={styles.rowCopy}>
+                  <Text style={styles.rowTitle}>
+                    {expense.description?.trim() || categoryName}
+                  </Text>
+                  <Text style={styles.rowMeta}>
+                    {categoryName} · {formatDate(expense.expenseDate)}
+                  </Text>
+                </View>
                 <Text style={styles.rowAmount}>
                   {formatCurrency(expense.amountCents, expense.currency)}
                 </Text>
               </Pressable>
-            </AppCard>
-          );
-        })
+            );
+          })}
+        </AppCard>
       )}
     </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  filterLabel: {
-    marginBottom: 8,
+  searchField: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.sm,
+    marginBottom: SPACING.md,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADII.sm,
+    backgroundColor: "#FFF",
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 12,
     fontFamily: FONTS.body,
-    fontSize: 12,
+    fontSize: 15,
+    color: COLORS.text,
+  },
+  filterGroup: {
+    marginBottom: SPACING.sm,
+  },
+  filterLabel: {
+    marginBottom: SPACING.xs,
+    fontFamily: FONTS.body,
+    fontSize: 11,
     color: COLORS.textMuted,
     textTransform: "uppercase",
+    letterSpacing: 0.7,
   },
-  filters: {
-    marginBottom: SPACING.md,
+  filterContent: {
+    paddingRight: SPACING.lg,
   },
   chip: {
+    minHeight: 38,
+    justifyContent: "center",
     borderRadius: RADII.pill,
     backgroundColor: COLORS.surfaceMuted,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    marginRight: 8,
+    paddingHorizontal: SPACING.md,
+    marginRight: SPACING.xs,
   },
   chipSelected: {
     backgroundColor: COLORS.text,
@@ -236,12 +340,31 @@ const styles = StyleSheet.create({
   chipTextSelected: {
     color: "#FFF",
   },
+  pressed: {
+    opacity: 0.72,
+  },
+  listCard: {
+    marginTop: SPACING.xs,
+    paddingVertical: 0,
+  },
   row: {
-    marginBottom: SPACING.sm,
+    minHeight: 76,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: SPACING.md,
+    paddingVertical: SPACING.md,
+  },
+  rowBorder: {
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  rowCopy: {
+    flex: 1,
   },
   rowTitle: {
     fontFamily: FONTS.display,
-    fontSize: 18,
+    fontSize: 16,
     color: COLORS.text,
   },
   rowMeta: {
@@ -251,9 +374,8 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
   },
   rowAmount: {
-    marginTop: 12,
     fontFamily: FONTS.display,
-    fontSize: 20,
+    fontSize: 17,
     color: COLORS.text,
   },
 });

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { AppScreen } from "../components/AppScreen";
@@ -14,7 +14,7 @@ import { CategoryRepository } from "../repositories/categoryRepository";
 import { buildResolvedCategoryBreakdown } from "../domain/categoryResolution";
 import { RootStackParamList } from "../navigation/RootNavigator";
 import { useSyncGate } from "../state/syncGateContext";
-import { COLORS, FONTS, SPACING } from "../theme/tokens";
+import { COLORS, FONTS, RADII, SPACING } from "../theme/tokens";
 
 type InsightsNav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -85,19 +85,30 @@ export function MonthlySummaryScreen() {
         <EmptyState title={t("insights.title")} body={t("insights.noMonthData")} />
       ) : (
         <>
-          <View style={styles.monthGrid}>
-            {monthKeys.slice(0, 6).map((monthKey) => {
+          <Text style={styles.filterLabel}>{t("insights.exploreMonths")}</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.monthStrip}
+            contentContainerStyle={styles.monthStripContent}
+          >
+            {monthKeys.map((monthKey) => {
               const selected = selectedMonth === monthKey;
               return (
                 <Pressable
                   key={monthKey}
+                  accessibilityRole="button"
                   onPress={() => setSelectedMonth(monthKey)}
-                  style={[styles.monthCard, selected && styles.monthCardSelected]}
+                  style={({ pressed }) => [
+                    styles.monthChip,
+                    selected && styles.monthChipSelected,
+                    pressed && styles.pressed,
+                  ]}
                 >
                   <Text
                     style={[
-                      styles.monthCardLabel,
-                      selected && styles.monthCardLabelSelected,
+                      styles.monthChipLabel,
+                      selected && styles.monthChipLabelSelected,
                     ]}
                   >
                     {formatMonth(monthKey)}
@@ -105,15 +116,18 @@ export function MonthlySummaryScreen() {
                 </Pressable>
               );
             })}
-          </View>
+          </ScrollView>
 
           {selectedMonth ? (
             <AppCard style={styles.hero}>
-              <Text style={styles.heroLabel}>{t("insights.totalSpending")}</Text>
+              <View style={styles.heroTop}>
+                <Text style={styles.heroLabel}>{t("insights.totalSpending")}</Text>
+                <Text style={styles.heroMonth}>{formatMonth(selectedMonth)}</Text>
+              </View>
               <Text style={styles.heroValue}>{formatCurrency(total)}</Text>
               {topCategory ? (
                 <Text style={styles.heroHint}>
-                  {topCategory.name}: {formatCurrency(topCategory.total)}
+                  {topCategory.name} · {formatCurrency(topCategory.total)}
                 </Text>
               ) : null}
             </AppCard>
@@ -124,11 +138,18 @@ export function MonthlySummaryScreen() {
               <Text style={styles.sectionTitle}>{t("insights.categoryBreakdown")}</Text>
               {selectedMonth ? (
                 <Pressable
+                  accessibilityRole="button"
                   onPress={() =>
                     navigation.navigate("MonthDetail", { monthKey: selectedMonth })
                   }
+                  style={({ pressed }) => [
+                    styles.detailButton,
+                    pressed && styles.pressed,
+                  ]}
                 >
-                  <Text style={styles.link}>{t("insights.monthDetail")}</Text>
+                  <Text style={styles.detailButtonText}>
+                    {t("insights.monthDetail")}
+                  </Text>
                 </Pressable>
               ) : null}
             </View>
@@ -138,22 +159,47 @@ export function MonthlySummaryScreen() {
                 body={t("insights.noCategoryData")}
               />
             ) : (
-              breakdown.map((item) => (
-                <Pressable
-                  key={item.categoryId}
-                  onPress={() =>
-                    selectedMonth &&
-                    navigation.navigate("CategoryTransactions", {
-                      monthKey: selectedMonth,
-                      categoryId: item.categoryId,
-                    })
-                  }
-                  style={styles.breakdownRow}
-                >
-                  <Text style={styles.breakdownName}>{item.name}</Text>
-                  <Text style={styles.breakdownValue}>{formatCurrency(item.total)}</Text>
-                </Pressable>
-              ))
+              breakdown.map((item, index) => {
+                const share = total > 0 ? item.total / total : 0;
+                return (
+                  <Pressable
+                    key={item.categoryId}
+                    accessibilityRole="button"
+                    onPress={() =>
+                      selectedMonth &&
+                      navigation.navigate("CategoryTransactions", {
+                        monthKey: selectedMonth,
+                        categoryId: item.categoryId,
+                      })
+                    }
+                    style={({ pressed }) => [
+                      styles.breakdownRow,
+                      index > 0 && styles.breakdownRowBorder,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <View style={styles.breakdownTop}>
+                      <View style={styles.breakdownCopy}>
+                        <Text style={styles.breakdownName}>{item.name}</Text>
+                        <Text style={styles.breakdownShare}>
+                          {Math.round(share * 100)}%
+                        </Text>
+                      </View>
+                      <Text style={styles.breakdownValue}>
+                        {formatCurrency(item.total)}
+                      </Text>
+                    </View>
+                    <View style={styles.progressTrack}>
+                      <View
+                        style={[
+                          styles.progressFill,
+                          { width: `${share * 100}%` },
+                        ]}
+                      />
+                    </View>
+                  </Pressable>
+                );
+              })
             )}
           </AppCard>
         </>
@@ -163,48 +209,74 @@ export function MonthlySummaryScreen() {
 }
 
 const styles = StyleSheet.create({
-  monthGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: SPACING.sm,
+  filterLabel: {
+    marginBottom: SPACING.xs,
+    fontFamily: FONTS.body,
+    fontSize: 11,
+    color: COLORS.textMuted,
+    textTransform: "uppercase",
+    letterSpacing: 0.7,
+  },
+  monthStrip: {
     marginBottom: SPACING.md,
   },
-  monthCard: {
-    width: "48%",
-    padding: SPACING.md,
-    borderRadius: 20,
+  monthStripContent: {
+    paddingRight: SPACING.lg,
+  },
+  monthChip: {
+    minHeight: 42,
+    justifyContent: "center",
+    paddingHorizontal: SPACING.md,
+    marginRight: SPACING.xs,
+    borderRadius: RADII.pill,
     backgroundColor: COLORS.surfaceMuted,
   },
-  monthCardSelected: {
+  monthChipSelected: {
     backgroundColor: COLORS.text,
   },
-  monthCardLabel: {
-    fontFamily: FONTS.display,
-    fontSize: 18,
+  monthChipLabel: {
+    fontFamily: FONTS.body,
+    fontSize: 13,
     color: COLORS.text,
   },
-  monthCardLabelSelected: {
+  monthChipLabelSelected: {
     color: "#FFF",
+  },
+  pressed: {
+    opacity: 0.72,
   },
   hero: {
     marginBottom: SPACING.md,
+    backgroundColor: COLORS.accent,
+    borderColor: COLORS.accent,
+  },
+  heroTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: SPACING.sm,
   },
   heroLabel: {
     fontFamily: FONTS.body,
     fontSize: 12,
-    color: COLORS.textMuted,
-    marginBottom: 10,
+    color: "rgba(255, 255, 255, 0.74)",
+  },
+  heroMonth: {
+    fontFamily: FONTS.body,
+    fontSize: 12,
+    color: "rgba(255, 255, 255, 0.74)",
   },
   heroValue: {
+    marginTop: SPACING.xs,
     fontFamily: FONTS.display,
-    fontSize: 28,
-    color: COLORS.text,
+    fontSize: 34,
+    color: "#FFF",
   },
   heroHint: {
-    marginTop: 8,
+    marginTop: SPACING.sm,
     fontFamily: FONTS.body,
     fontSize: 13,
-    color: COLORS.textMuted,
+    color: "rgba(255, 255, 255, 0.82)",
   },
   sectionHeader: {
     flexDirection: "row",
@@ -217,27 +289,62 @@ const styles = StyleSheet.create({
     fontSize: 20,
     color: COLORS.text,
   },
-  link: {
+  detailButton: {
+    minHeight: 36,
+    justifyContent: "center",
+    paddingHorizontal: SPACING.sm,
+    borderRadius: RADII.pill,
+    backgroundColor: COLORS.accentSoft,
+  },
+  detailButtonText: {
     fontFamily: FONTS.body,
-    fontSize: 13,
+    fontSize: 12,
     color: COLORS.accent,
   },
   breakdownRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    paddingVertical: SPACING.sm,
+  },
+  breakdownRowBorder: {
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
-    paddingVertical: 12,
+  },
+  breakdownTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: SPACING.md,
+  },
+  breakdownCopy: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: SPACING.xs,
   },
   breakdownName: {
     fontFamily: FONTS.body,
     fontSize: 15,
     color: COLORS.text,
   },
+  breakdownShare: {
+    fontFamily: FONTS.body,
+    fontSize: 11,
+    color: COLORS.textMuted,
+  },
   breakdownValue: {
     fontFamily: FONTS.display,
     fontSize: 15,
     color: COLORS.text,
+  },
+  progressTrack: {
+    height: 6,
+    marginTop: SPACING.sm,
+    overflow: "hidden",
+    borderRadius: RADII.pill,
+    backgroundColor: COLORS.surfaceMuted,
+  },
+  progressFill: {
+    height: "100%",
+    borderRadius: RADII.pill,
+    backgroundColor: COLORS.accent,
   },
 });
