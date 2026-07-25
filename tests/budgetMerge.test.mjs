@@ -4,6 +4,7 @@ import {
   budgetIdentityKey,
   findMatchingBudgetRecord,
   preferBudgetRecord,
+  resolveEffectiveBudgets,
 } from "../.test-dist/src/domain/budgetMerge.js";
 
 test("preferBudgetRecord keeps the most recently updated budget", () => {
@@ -125,4 +126,69 @@ test("findMatchingBudgetRecord falls back to category-month matches", () => {
     }),
     records[0]
   );
+});
+
+test("resolveEffectiveBudgets carries the latest category budget forward", () => {
+  const records = [
+    {
+      id: "food-may",
+      categoryId: "food",
+      monthKey: "2026-05",
+      amountCents: 30000,
+      createdAt: "2026-05-01T09:00:00.000Z",
+      updatedAt: "2026-05-01T09:00:00.000Z",
+    },
+    {
+      id: "food-july",
+      categoryId: "food",
+      monthKey: "2026-07",
+      amountCents: 45000,
+      createdAt: "2026-07-01T09:00:00.000Z",
+      updatedAt: "2026-07-01T09:00:00.000Z",
+    },
+    {
+      id: "rent-june",
+      categoryId: "rent",
+      monthKey: "2026-06",
+      amountCents: 120000,
+      createdAt: "2026-06-01T09:00:00.000Z",
+      updatedAt: "2026-06-01T09:00:00.000Z",
+    },
+  ];
+
+  assert.deepEqual(
+    resolveEffectiveBudgets(records, "2026-06").map((budget) => [
+      budget.categoryId,
+      budget.amountCents,
+    ]),
+    [
+      ["food", 30000],
+      ["rent", 120000],
+    ]
+  );
+  assert.deepEqual(
+    resolveEffectiveBudgets(records, "2026-07").map((budget) => [
+      budget.categoryId,
+      budget.amountCents,
+    ]),
+    [
+      ["food", 45000],
+      ["rent", 120000],
+    ]
+  );
+});
+
+test("resolveEffectiveBudgets does not apply a budget before its first month", () => {
+  const records = [
+    {
+      id: "food-july",
+      categoryId: "food",
+      monthKey: "2026-07",
+      amountCents: 45000,
+      createdAt: "2026-07-01T09:00:00.000Z",
+      updatedAt: "2026-07-01T09:00:00.000Z",
+    },
+  ];
+
+  assert.deepEqual(resolveEffectiveBudgets(records, "2026-06"), []);
 });

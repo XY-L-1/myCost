@@ -41,3 +41,27 @@ export function findMatchingBudgetRecord<T extends BudgetIdentity>(
 
   return records.find((record) => record.id === budget.id);
 }
+
+export function resolveEffectiveBudgets<
+  T extends BudgetIdentity & MergeableBudget,
+>(records: T[], monthKey: string): T[] {
+  const effectiveByCategory = new Map<string, T>();
+
+  records.forEach((record) => {
+    if (record.monthKey > monthKey) return;
+
+    const current = effectiveByCategory.get(record.categoryId);
+    if (
+      !current ||
+      record.monthKey > current.monthKey ||
+      (record.monthKey === current.monthKey &&
+        preferBudgetRecord(current, record) === record)
+    ) {
+      effectiveByCategory.set(record.categoryId, record);
+    }
+  });
+
+  return Array.from(effectiveByCategory.values()).sort((a, b) =>
+    a.categoryId.localeCompare(b.categoryId)
+  );
+}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
+import Svg, { Path } from "react-native-svg";
 import { AppScreen } from "../components/AppScreen";
 import { ScreenHeader } from "../components/ScreenHeader";
 import { AppCard } from "../components/AppCard";
@@ -37,6 +38,9 @@ export function BudgetScreen() {
   const [monthKey, setMonthKey] = useState(formatMonthKey(new Date()));
   const [rows, setRows] = useState<BudgetRow[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [draftError, setDraftError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!scope) return;
@@ -146,17 +150,48 @@ export function BudgetScreen() {
     () => rows.reduce((sum, row) => sum + row.actualCents, 0),
     [rows]
   );
+  const totalRemaining = totalBudget - totalActual;
+  const totalProgress =
+    totalBudget > 0 ? Math.min(totalActual / totalBudget, 1) : 0;
 
   const saveBudget = async (categoryId: string) => {
     if (!scope) return;
     const amount = Number(drafts[categoryId] ?? "0");
-    const amountCents = Number.isFinite(amount) ? Math.round(amount * 100) : 0;
-    await BudgetRepository.upsert(scope, {
-      categoryId,
-      monthKey,
-      amountCents,
-    });
-    await load();
+    if (!Number.isFinite(amount) || amount < 0) {
+      setDraftError(t("categories.validationBudget"));
+      return;
+    }
+
+    setDraftError(null);
+    setSavingId(categoryId);
+    try {
+      await BudgetRepository.upsert(scope, {
+        categoryId,
+        monthKey,
+        amountCents: Math.round(amount * 100),
+      });
+      setEditingId(null);
+      await load();
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const changeMonth = (amount: number) => {
+    setEditingId(null);
+    setDraftError(null);
+    setMonthKey((value) => shiftMonth(value, amount));
+  };
+
+  const startEditing = (row: BudgetRow) => {
+    setDrafts((current) => ({
+      ...current,
+      [row.categoryId]: row.budgetCents
+        ? (row.budgetCents / 100).toFixed(2)
+        : "",
+    }));
+    setDraftError(null);
+    setEditingId(row.categoryId);
   };
 
   if (!scope) return null;
@@ -164,31 +199,69 @@ export function BudgetScreen() {
   return (
     <AppScreen scroll>
       <ScreenHeader title={t("budget.title")} subtitle={t("budget.subtitle")} />
-      <Text style={styles.note}>{t("budget.localOnlyNote")}</Text>
 
       <View style={styles.monthRow}>
-        <AppButton
-          label="‹"
-          variant="secondary"
-          onPress={() => setMonthKey((value) => shiftMonth(value, -1))}
+        <MonthButton
+          direction="previous"
+          label={t("budget.previousMonth")}
+          onPress={() => changeMonth(-1)}
         />
         <Text style={styles.monthLabel}>{formatMonth(monthKey)}</Text>
-        <AppButton
-          label="›"
-          variant="secondary"
-          onPress={() => setMonthKey((value) => shiftMonth(value, 1))}
+        <MonthButton
+          direction="next"
+          label={t("budget.nextMonth")}
+          onPress={() => changeMonth(1)}
         />
       </View>
 
-      <View style={styles.summaryRow}>
-        <AppCard style={styles.summaryCard}>
-          <Text style={styles.summaryLabel}>{t("budget.totalBudget")}</Text>
-          <Text style={styles.summaryValue}>{formatCurrency(totalBudget)}</Text>
-        </AppCard>
-        <AppCard style={styles.summaryCard}>
-          <Text style={styles.summaryLabel}>{t("budget.totalActual")}</Text>
-          <Text style={styles.summaryValue}>{formatCurrency(totalActual)}</Text>
-        </AppCard>
+      <AppCard style={styles.summaryCard}>
+        <View style={styles.summaryTop}>
+          <View>
+            <Text style={styles.summaryLabel}>
+              {totalBudget === 0
+                ? t("budget.totalBudget")
+                : totalRemaining < 0
+                  ? t("budget.overBy")
+                  : t("common.remaining")}
+            </Text>
+            <Text style={styles.summaryValue}>
+              {formatCurrency(
+                totalBudget === 0 ? 0 : Math.abs(totalRemaining)
+              )}
+            </Text>
+          </View>
+          <View style={styles.statusBadge}>
+            <Text style={styles.statusText}>
+              {totalBudget === 0
+                ? t("budget.noBudget")
+                : totalRemaining < 0
+                  ? t("budget.overBudget")
+                  : t("budget.onTrack")}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.summaryTrack}>
+          <View
+            style={[
+              styles.summaryFill,
+              { width: `${totalProgress * 100}%` },
+              totalRemaining < 0 && styles.progressDanger,
+            ]}
+          />
+        </View>
+        <View style={styles.summaryMetrics}>
+          <Text style={styles.summaryMetric}>
+            {t("budget.totalActual")} · {formatCurrency(totalActual)}
+          </Text>
+          <Text style={styles.summaryMetric}>
+            {t("budget.totalBudget")} · {formatCurrency(totalBudget)}
+          </Text>
+        </View>
+      </AppCard>
+
+      <View style={styles.note}>
+        <View style={styles.noteDot} />
+        <Text style={styles.noteText}>{t("budget.localOnlyNote")}</Text>
       </View>
 
       {rows.length === 0 ? (
@@ -197,34 +270,107 @@ export function BudgetScreen() {
         <View style={styles.list}>
           {rows.map((row) => {
             const remaining = row.budgetCents - row.actualCents;
+            const progress =
+              row.budgetCents > 0
+                ? Math.min(row.actualCents / row.budgetCents, 1)
+                : 0;
+            const isOverBudget = row.budgetCents > 0 && remaining < 0;
+            const isEditing = editingId === row.categoryId;
             return (
               <AppCard key={row.categoryId} style={styles.rowCard}>
                 <View style={styles.rowTop}>
-                  <Text style={styles.rowTitle}>{row.name}</Text>
-                  <Text
-                    style={[
-                      styles.remaining,
-                      remaining < 0 && styles.remainingNegative,
+                  <View style={styles.rowHeading}>
+                    <Text style={styles.rowTitle}>{row.name}</Text>
+                    <Text style={styles.rowBudget}>
+                      {t("common.budget")} · {formatCurrency(row.budgetCents)}
+                    </Text>
+                  </View>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => startEditing(row)}
+                    hitSlop={8}
+                    style={({ pressed }) => [
+                      styles.editButton,
+                      pressed && styles.pressed,
                     ]}
                   >
-                    {formatCurrency(remaining)}
-                  </Text>
+                    <Text style={styles.editButtonText}>
+                      {row.budgetCents > 0
+                        ? t("common.edit")
+                        : t("budget.setBudget")}
+                    </Text>
+                  </Pressable>
                 </View>
-                <Text style={styles.metricText}>
-                  {t("common.actual")}: {formatCurrency(row.actualCents)}
-                </Text>
-                <AppInput
-                  label={t("common.budget")}
-                  value={drafts[row.categoryId] ?? ""}
-                  onChangeText={(value) =>
-                    setDrafts((current) => ({ ...current, [row.categoryId]: value }))
-                  }
-                  keyboardType="decimal-pad"
-                />
-                <AppButton
-                  label={t("budget.setBudget")}
-                  onPress={() => saveBudget(row.categoryId)}
-                />
+                <View style={styles.progressTrack}>
+                  <View
+                    style={[
+                      styles.progressFill,
+                      { width: `${progress * 100}%` },
+                      isOverBudget && styles.progressDanger,
+                    ]}
+                  />
+                </View>
+                <View style={styles.metricsRow}>
+                  <View>
+                    <Text style={styles.metricLabel}>{t("common.actual")}</Text>
+                    <Text style={styles.metricValue}>
+                      {formatCurrency(row.actualCents)}
+                    </Text>
+                  </View>
+                  <View style={styles.metricRight}>
+                    <Text style={styles.metricLabel}>
+                      {row.budgetCents === 0
+                        ? t("budget.noBudget")
+                        : isOverBudget
+                          ? t("budget.overBy")
+                          : t("common.remaining")}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.metricValue,
+                        row.budgetCents > 0 && styles.remaining,
+                        isOverBudget && styles.remainingNegative,
+                      ]}
+                    >
+                      {formatCurrency(
+                        row.budgetCents === 0 ? 0 : Math.abs(remaining)
+                      )}
+                    </Text>
+                  </View>
+                </View>
+                {isEditing ? (
+                  <View style={styles.editor}>
+                    <AppInput
+                      label={t("common.budget")}
+                      value={drafts[row.categoryId] ?? ""}
+                      onChangeText={(value) => {
+                        setDrafts((current) => ({
+                          ...current,
+                          [row.categoryId]: value,
+                        }));
+                        if (draftError) setDraftError(null);
+                      }}
+                      keyboardType="decimal-pad"
+                      error={draftError}
+                    />
+                    <View style={styles.editorActions}>
+                      <AppButton
+                        label={t("common.cancel")}
+                        variant="secondary"
+                        disabled={savingId === row.categoryId}
+                        onPress={() => {
+                          setEditingId(null);
+                          setDraftError(null);
+                        }}
+                      />
+                      <AppButton
+                        label={t("common.save")}
+                        disabled={savingId === row.categoryId}
+                        onPress={() => saveBudget(row.categoryId)}
+                      />
+                    </View>
+                  </View>
+                ) : null}
               </AppCard>
             );
           })}
@@ -235,42 +381,108 @@ export function BudgetScreen() {
 }
 
 const styles = StyleSheet.create({
-  note: {
-    marginTop: SPACING.sm,
-    marginBottom: SPACING.md,
-    fontFamily: FONTS.body,
-    fontSize: 13,
-    color: COLORS.textMuted,
-  },
   monthRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: SPACING.md,
+    backgroundColor: COLORS.surfaceMuted,
+    borderRadius: RADII.pill,
+    padding: SPACING.xs,
+  },
+  monthButton: {
+    width: 44,
+    height: 44,
+    borderRadius: RADII.pill,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.surface,
+  },
+  pressed: {
+    opacity: 0.7,
   },
   monthLabel: {
     fontFamily: FONTS.display,
     fontSize: 20,
     color: COLORS.text,
   },
-  summaryRow: {
-    flexDirection: "row",
-    gap: SPACING.sm,
-    marginBottom: SPACING.md,
-  },
   summaryCard: {
-    flex: 1,
+    marginBottom: SPACING.sm,
+    backgroundColor: COLORS.accent,
+    borderColor: COLORS.accent,
+  },
+  summaryTop: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: SPACING.md,
   },
   summaryLabel: {
     fontFamily: FONTS.body,
     fontSize: 12,
-    color: COLORS.textMuted,
-    marginBottom: 8,
+    color: "rgba(255, 255, 255, 0.74)",
+    marginBottom: SPACING.xs,
   },
   summaryValue: {
     fontFamily: FONTS.display,
-    fontSize: 20,
-    color: COLORS.text,
+    fontSize: 32,
+    color: "#FFF",
+  },
+  statusBadge: {
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.xs,
+    borderRadius: RADII.pill,
+    backgroundColor: "rgba(255, 255, 255, 0.14)",
+  },
+  statusText: {
+    fontFamily: FONTS.body,
+    fontSize: 12,
+    color: "#FFF",
+  },
+  summaryTrack: {
+    height: 8,
+    marginTop: SPACING.md,
+    overflow: "hidden",
+    borderRadius: RADII.pill,
+    backgroundColor: "rgba(255, 255, 255, 0.18)",
+  },
+  summaryFill: {
+    height: "100%",
+    borderRadius: RADII.pill,
+    backgroundColor: "#FFF",
+  },
+  summaryMetrics: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: SPACING.sm,
+    marginTop: SPACING.sm,
+  },
+  summaryMetric: {
+    fontFamily: FONTS.body,
+    fontSize: 12,
+    color: "rgba(255, 255, 255, 0.78)",
+  },
+  note: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: SPACING.sm,
+    marginTop: SPACING.sm,
+    marginBottom: SPACING.lg,
+    paddingHorizontal: SPACING.xs,
+  },
+  noteDot: {
+    width: 7,
+    height: 7,
+    marginTop: 6,
+    borderRadius: RADII.pill,
+    backgroundColor: COLORS.accent,
+  },
+  noteText: {
+    flex: 1,
+    fontFamily: FONTS.body,
+    fontSize: 13,
+    lineHeight: 19,
+    color: COLORS.textMuted,
   },
   list: {
     gap: SPACING.sm,
@@ -281,26 +493,119 @@ const styles = StyleSheet.create({
   rowTop: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 8,
+    alignItems: "flex-start",
+    gap: SPACING.sm,
+  },
+  rowHeading: {
+    flex: 1,
   },
   rowTitle: {
     fontFamily: FONTS.display,
     fontSize: 18,
     color: COLORS.text,
   },
-  remaining: {
+  rowBudget: {
+    marginTop: 3,
     fontFamily: FONTS.body,
-    fontSize: 13,
+    fontSize: 12,
+    color: COLORS.textMuted,
+  },
+  editButton: {
+    minHeight: 36,
+    paddingHorizontal: SPACING.sm,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: RADII.pill,
+    backgroundColor: COLORS.accentSoft,
+  },
+  editButtonText: {
+    fontFamily: FONTS.body,
+    fontSize: 12,
+    color: COLORS.accent,
+  },
+  progressTrack: {
+    height: 7,
+    marginTop: SPACING.md,
+    overflow: "hidden",
+    borderRadius: RADII.pill,
+    backgroundColor: COLORS.surfaceMuted,
+  },
+  progressFill: {
+    height: "100%",
+    borderRadius: RADII.pill,
+    backgroundColor: COLORS.accent,
+  },
+  progressDanger: {
+    backgroundColor: COLORS.danger,
+  },
+  metricsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: SPACING.sm,
+  },
+  metricRight: {
+    alignItems: "flex-end",
+  },
+  metricLabel: {
+    fontFamily: FONTS.body,
+    fontSize: 11,
+    color: COLORS.textMuted,
+  },
+  metricValue: {
+    marginTop: 2,
+    fontFamily: FONTS.body,
+    fontSize: 14,
+    color: COLORS.text,
+  },
+  remaining: {
     color: COLORS.success,
   },
   remainingNegative: {
     color: COLORS.danger,
   },
-  metricText: {
-    fontFamily: FONTS.body,
-    fontSize: 13,
-    color: COLORS.textMuted,
-    marginBottom: 10,
+  editor: {
+    marginTop: SPACING.md,
+    paddingTop: SPACING.md,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  editorActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: SPACING.sm,
   },
 });
+
+function MonthButton({
+  direction,
+  label,
+  onPress,
+}: {
+  direction: "previous" | "next";
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      hitSlop={8}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.monthButton,
+        pressed && styles.pressed,
+      ]}
+    >
+      <Svg width={20} height={20} viewBox="0 0 20 20">
+        <Path
+          d={direction === "previous" ? "M12.5 4.5 7 10l5.5 5.5" : "M7.5 4.5 13 10l-5.5 5.5"}
+          fill="none"
+          stroke={COLORS.text}
+          strokeWidth={1.8}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </Svg>
+    </Pressable>
+  );
+}

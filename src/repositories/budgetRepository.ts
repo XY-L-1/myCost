@@ -1,5 +1,6 @@
 import { query, queryFirst, run } from "../db/database";
 import { DataScope, buildScopeFilter } from "../domain/dataScope";
+import { resolveEffectiveBudgets } from "../domain/budgetMerge";
 import { Budget, BudgetSchema } from "../types/budget";
 import { generateUUID } from "../utils/uuid";
 import { notifyBudgetMutation } from "../sync/syncEvents";
@@ -21,13 +22,15 @@ export class BudgetRepository {
       SELECT *
       FROM budgets
       WHERE ${owner.clause}
-        AND monthKey = ?
-      ORDER BY categoryId;
+        AND monthKey <= ?;
       `,
       [...owner.params, monthKey]
     );
 
-    return rows.map((row) => BudgetSchema.parse(row));
+    return resolveEffectiveBudgets(
+      rows.map((row) => BudgetSchema.parse(row)),
+      monthKey
+    );
   }
 
   static async upsert(scope: DataScope, input: BudgetInput): Promise<Budget> {
