@@ -1,5 +1,7 @@
 import { create } from "zustand";
+import { resetDatabaseConnection } from "../db/database";
 import { runMigrations } from "../db/migration";
+import { runWithDatabaseRecovery } from "../domain/databaseRecovery";
 import { generateUUID } from "../utils/uuid";
 import { keyValueStorage } from "../services/keyValueStorage";
 
@@ -53,7 +55,7 @@ export const useAppInitStore = create<AppInitState>((set) => ({
          set({ initializing: true, error: null });
 
          // 1. Ensure database schema is up to date
-         await runMigrations();
+         await runWithDatabaseRecovery(runMigrations, resetDatabaseConnection);
 
          // 2. Ensure deviceId exists
          const deviceId = await getDeviceId();

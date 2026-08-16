@@ -16,6 +16,7 @@
     "src/domain/categoryMerge.ts",
     "src/domain/categoryResolution.ts",
     "src/domain/dataScope.ts",
+    "src/domain/databaseRecovery.ts",
     "src/domain/expenseMutations.ts",
     "src/utils/categoryIdentity.ts",
     "src/utils/amountInput.ts",

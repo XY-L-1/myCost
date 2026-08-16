@@ -1,10 +1,23 @@
-import { exec, query } from "./database";
+import { exec, query, run, withTransaction } from "./database";
+import { addColumnIfMissing } from "../domain/databaseRecovery";
 import { GUEST_OWNER_KEY } from "../domain/dataScope";
 
 type Migration = {
    version: number;
    up: () => Promise<void>;
 };
+
+async function ensureColumn(
+   tableName: string,
+   columnName: string,
+   alterTableSql: string
+): Promise<void> {
+   await addColumnIfMissing(
+      () => query<{ name: string }>(`PRAGMA table_info(${tableName});`),
+      columnName,
+      () => exec(alterTableSql)
+   );
+}
 
 const migrations: Migration[] = [
    {
@@ -71,9 +84,13 @@ const migrations: Migration[] = [
       version: 2,
       up: async () => {
          // Add normalizedName to categories for deterministic identity.
-         await exec(`
-         ALTER TABLE categories ADD COLUMN normalizedName TEXT;
-         `);
+         await ensureColumn(
+            "categories",
+            "normalizedName",
+            `
+            ALTER TABLE categories ADD COLUMN normalizedName TEXT;
+            `
+         );
 
          // Backfill normalizedName for existing rows.
          await exec(`
@@ -91,13 +108,21 @@ const migrations: Migration[] = [
    {
       version: 3,
       up: async () => {
-         await exec(`
-         ALTER TABLE expenses ADD COLUMN ownerKey TEXT;
-         `);
+         await ensureColumn(
+            "expenses",
+            "ownerKey",
+            `
+            ALTER TABLE expenses ADD COLUMN ownerKey TEXT;
+            `
+         );
 
-         await exec(`
-         ALTER TABLE categories ADD COLUMN ownerKey TEXT;
-         `);
+         await ensureColumn(
+            "categories",
+            "ownerKey",
+            `
+            ALTER TABLE categories ADD COLUMN ownerKey TEXT;
+            `
+         );
 
          await exec(`
          UPDATE expenses
@@ -168,9 +193,13 @@ const migrations: Migration[] = [
    {
       version: 5,
       up: async () => {
-         await exec(`
-         ALTER TABLE categories ADD COLUMN budget REAL NOT NULL DEFAULT 0;
-         `);
+         await ensureColumn(
+            "categories",
+            "budget",
+            `
+            ALTER TABLE categories ADD COLUMN budget REAL NOT NULL DEFAULT 0;
+            `
+         );
 
          await exec(`
          UPDATE categories
@@ -199,9 +228,12 @@ const migrations: Migration[] = [
 
    for (const migration of pending) {
       console.log(`Running migration v${migration.version}`);
-      await migration.up();
-      await exec(
-         `INSERT INTO migrations (version, applied_at) VALUES (${migration.version}, '${new Date().toISOString()}');`
-      );
+      await withTransaction(async () => {
+         await migration.up();
+         await run(
+            `INSERT INTO migrations (version, applied_at) VALUES (?, ?);`,
+            [migration.version, new Date().toISOString()]
+         );
+      });
    }
 }

@@ -4,8 +4,30 @@ import { openDatabaseAsync, SQLiteDatabase } from "expo-sqlite";
 let dbPromise: Promise<SQLiteDatabase> | null = null;
 
 async function getDb(): Promise<SQLiteDatabase> {
-   dbPromise ??= openDatabaseAsync("expense_tracker.db");
+   dbPromise ??= openDatabaseAsync("expense_tracker.db").catch((error) => {
+      dbPromise = null;
+      throw error;
+   });
    return dbPromise;
+}
+
+export async function resetDatabaseConnection(): Promise<void> {
+   const currentDbPromise = dbPromise;
+   dbPromise = null;
+
+   if (!currentDbPromise) return;
+
+   try {
+      const db = await currentDbPromise;
+      await db.closeAsync();
+   } catch (error) {
+      console.warn("Failed to close the previous database connection", error);
+   }
+}
+
+export async function withTransaction(task: () => Promise<void>): Promise<void> {
+   const db = await getDb();
+   await db.withTransactionAsync(task);
 }
 
 /**
