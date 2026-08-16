@@ -18,6 +18,7 @@
     "src/domain/dataScope.ts",
     "src/domain/expenseMutations.ts",
     "src/utils/categoryIdentity.ts",
+    "src/utils/amountInput.ts",
     "src/utils/date.ts",
     "src/types/expense.ts"
   ]

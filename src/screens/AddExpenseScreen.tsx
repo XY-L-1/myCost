@@ -1,4 +1,4 @@
-import { createElement, useCallback, useEffect, useMemo, useState } from "react";
+import { createElement, useCallback, useEffect, useState } from "react";
 import { Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useFocusEffect } from "@react-navigation/native";
@@ -24,6 +24,7 @@ import {
 import { RootStackParamList } from "../navigation/RootNavigator";
 import { useAppInitStore } from "../state/appInitStore";
 import { useSettingsStore } from "../settings/settingsStore";
+import { formatAmountInput, parseAmountInput } from "../utils/amountInput";
 import { formatDateKey, parseDateKey } from "../utils/date";
 import { generateUUID } from "../utils/uuid";
 import { COLORS, FONTS, RADII, SPACING } from "../theme/tokens";
@@ -39,18 +40,14 @@ export function AddExpenseScreen({ navigation, route }: Props) {
 
   const [loading, setLoading] = useState(true);
   const [expenseId, setExpenseId] = useState<string | null>(route.params?.expenseId ?? null);
-  const [amount, setAmount] = useState("");
+  const [amountCents, setAmountCents] = useState(0);
   const [description, setDescription] = useState("");
   const [dateKey, setDateKey] = useState(formatDateKey(new Date()));
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [showPicker, setShowPicker] = useState(false);
   const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([]);
   const [errors, setErrors] = useState<Record<string, string | null>>({});
-
-  const amountCents = useMemo(() => {
-    const parsed = Number(amount);
-    return Number.isFinite(parsed) ? Math.round(parsed * 100) : 0;
-  }, [amount]);
+  const amountInput = formatAmountInput(amountCents);
 
   const load = useCallback(async () => {
     if (!scope || !deviceId) return;
@@ -77,7 +74,7 @@ export function AddExpenseScreen({ navigation, route }: Props) {
           expense.categoryId
         );
         setExpenseId(expense.id);
-        setAmount((expense.amountCents / 100).toFixed(2));
+        setAmountCents(expense.amountCents);
         setDescription(expense.description ?? "");
         setCategoryId(canonicalCategory?.id ?? categoryRows[0]?.id ?? null);
         setDateKey(expense.expenseDate);
@@ -181,9 +178,10 @@ export function AddExpenseScreen({ navigation, route }: Props) {
       <AppCard>
         <AppInput
           label={t("common.amount")}
-          value={amount}
-          onChangeText={setAmount}
-          keyboardType="decimal-pad"
+          value={amountInput}
+          onChangeText={(value) => setAmountCents(parseAmountInput(value))}
+          keyboardType="number-pad"
+          selection={{ start: amountInput.length }}
           error={errors.amount}
         />
         <AppInput

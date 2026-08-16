@@ -9,6 +9,7 @@ export function AppInput({
   error,
   secureTextEntry,
   keyboardType,
+  selection,
   multiline = false,
 }: {
   label: string;
@@ -17,7 +18,8 @@ export function AppInput({
   placeholder?: string;
   error?: string | null;
   secureTextEntry?: boolean;
-  keyboardType?: "default" | "email-address" | "decimal-pad";
+  keyboardType?: "default" | "email-address" | "decimal-pad" | "number-pad";
+  selection?: { start: number; end?: number };
   multiline?: boolean;
 }) {
   return (
@@ -31,6 +33,7 @@ export function AppInput({
         placeholderTextColor={COLORS.textMuted}
         secureTextEntry={secureTextEntry}
         keyboardType={keyboardType}
+        selection={selection}
         multiline={multiline}
         style={[styles.input, multiline && styles.multiline, !!error && styles.inputError]}
       />
