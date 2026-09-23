@@ -69,8 +69,12 @@ create table if not exists public.recurring_expenses (
   last_generated_date text,
   is_active int4 not null default 1 check (is_active in (0, 1)),
   created_at text not null,
-  updated_at text not null
+  updated_at text not null,
+  deleted_at text
 );
+
+alter table public.recurring_expenses
+add column if not exists deleted_at text;
 
 create index if not exists recurring_expenses_user_updated_idx
 on public.recurring_expenses(user_id, updated_at);

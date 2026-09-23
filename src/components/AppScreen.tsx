@@ -1,4 +1,4 @@
-import { ReactNode } from "react";
+import { ReactNode, Ref } from "react";
 import { Platform, ScrollView, StyleSheet, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { COLORS, SPACING } from "../theme/tokens";
@@ -6,15 +6,18 @@ import { COLORS, SPACING } from "../theme/tokens";
 export function AppScreen({
   children,
   scroll = false,
+  scrollRef,
 }: {
   children: ReactNode;
   scroll?: boolean;
+  scrollRef?: Ref<ScrollView>;
 }) {
   const insets = useSafeAreaInsets();
   const contentBottomPadding = SPACING.xl + insets.bottom;
   const scrollBottomPadding = contentBottomPadding + 72;
   const content = scroll ? (
     <ScrollView
+      ref={scrollRef}
       style={styles.scroll}
       showsVerticalScrollIndicator={false}
       contentContainerStyle={[

@@ -1,6 +1,5 @@
 import { z } from "zod";
 
-// Recurring rules are local-only until backend storage and sync support are added.
 export const RecurringFrequencySchema = z.enum(["weekly", "monthly"]);
 
 export const RecurringExpenseSchema = z.object({
@@ -16,6 +15,7 @@ export const RecurringExpenseSchema = z.object({
   isActive: z.number(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  deletedAt: z.string().nullable(),
   ownerKey: z.string(),
   userId: z.string().nullable(),
 });

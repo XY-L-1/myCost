@@ -179,6 +179,7 @@ const migrations: Migration[] = [
             isActive INTEGER NOT NULL,
             createdAt TEXT NOT NULL,
             updatedAt TEXT NOT NULL,
+            deletedAt TEXT,
             ownerKey TEXT NOT NULL,
             userId TEXT
          );
@@ -206,6 +207,18 @@ const migrations: Migration[] = [
          SET budget = 0
          WHERE budget IS NULL;
          `);
+      },
+   },
+   {
+      version: 6,
+      up: async () => {
+         await ensureColumn(
+            "recurring_expenses",
+            "deletedAt",
+            `
+            ALTER TABLE recurring_expenses ADD COLUMN deletedAt TEXT;
+            `
+         );
       },
    },
    ];

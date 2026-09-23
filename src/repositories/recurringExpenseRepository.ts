@@ -1,5 +1,6 @@
 import { query, queryFirst, run } from "../db/database";
 import { DataScope, buildScopeFilter } from "../domain/dataScope";
+import { buildSoftDeletedRecurringExpense } from "../domain/recurringExpenseMutations";
 import {
   RecurringExpense,
   RecurringExpenseSchema,
@@ -29,6 +30,7 @@ export class RecurringExpenseRepository {
       SELECT *
       FROM recurring_expenses
       WHERE ${owner.clause}
+        AND deletedAt IS NULL
       ORDER BY isActive DESC, nextDueDate ASC, title ASC;
       `,
       owner.params
@@ -73,6 +75,7 @@ export class RecurringExpenseRepository {
       isActive: 1,
       createdAt: now,
       updatedAt: now,
+      deletedAt: null,
       ownerKey: scope.ownerKey,
       userId: scope.userId,
     };
@@ -82,8 +85,8 @@ export class RecurringExpenseRepository {
       INSERT INTO recurring_expenses (
         id, title, amountCents, currency, categoryId, description,
         frequency, nextDueDate, lastGeneratedDate, isActive,
-        createdAt, updatedAt, ownerKey, userId
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        createdAt, updatedAt, deletedAt, ownerKey, userId
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
       `,
       [
         recurringExpense.id,
@@ -98,6 +101,7 @@ export class RecurringExpenseRepository {
         recurringExpense.isActive,
         recurringExpense.createdAt,
         recurringExpense.updatedAt,
+        recurringExpense.deletedAt,
         recurringExpense.ownerKey,
         recurringExpense.userId,
       ]
@@ -153,7 +157,7 @@ export class RecurringExpenseRepository {
       `
       UPDATE recurring_expenses
       SET isActive = ?, updatedAt = ?
-      WHERE id = ? AND ${owner.clause};
+      WHERE id = ? AND ${owner.clause} AND deletedAt IS NULL;
       `,
       [isActive ? 1 : 0, new Date().toISOString(), id, ...owner.params]
     );
@@ -171,18 +175,28 @@ export class RecurringExpenseRepository {
       `
       UPDATE recurring_expenses
       SET nextDueDate = ?, lastGeneratedDate = ?, updatedAt = ?
-      WHERE id = ? AND ${owner.clause};
+      WHERE id = ? AND ${owner.clause} AND deletedAt IS NULL;
       `,
       [nextDueDate, lastGeneratedDate, new Date().toISOString(), id, ...owner.params]
     );
     notifyRecurringExpenseMutation();
   }
 
-  static async remove(scope: DataScope, id: string): Promise<void> {
-    const owner = buildScopeFilter(scope);
+  static async softDelete(
+    recurringExpense: RecurringExpense,
+    deletedAt: string
+  ): Promise<void> {
+    const deleted = buildSoftDeletedRecurringExpense(
+      recurringExpense,
+      deletedAt
+    );
     await run(
-      `DELETE FROM recurring_expenses WHERE id = ? AND ${owner.clause};`,
-      [id, ...owner.params]
+      `
+      UPDATE recurring_expenses
+      SET deletedAt = ?, updatedAt = ?
+      WHERE id = ? AND ownerKey = ? AND deletedAt IS NULL;
+      `,
+      [deleted.deletedAt, deleted.updatedAt, deleted.id, deleted.ownerKey]
     );
     notifyRecurringExpenseMutation();
   }

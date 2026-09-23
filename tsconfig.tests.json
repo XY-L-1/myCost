@@ -18,9 +18,11 @@
     "src/domain/dataScope.ts",
     "src/domain/databaseRecovery.ts",
     "src/domain/expenseMutations.ts",
+    "src/domain/recurringExpenseMutations.ts",
     "src/utils/categoryIdentity.ts",
     "src/utils/amountInput.ts",
     "src/utils/date.ts",
-    "src/types/expense.ts"
+    "src/types/expense.ts",
+    "src/types/recurringExpense.ts"
   ]
 }

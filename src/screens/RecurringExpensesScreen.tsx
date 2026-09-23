@@ -1,5 +1,13 @@
-import { createElement, useCallback, useEffect, useState } from "react";
-import { Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { createElement, useCallback, useEffect, useRef, useState } from "react";
+import {
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import DateTimePicker, {
@@ -33,6 +41,7 @@ export function RecurringExpensesScreen() {
   const { formatCurrency, formatDate } = useFormatters();
   const scope = useCurrentScope();
   const preferredCurrency = useSettingsStore((state) => state.currency);
+  const scrollRef = useRef<ScrollView>(null);
 
   const [title, setTitle] = useState("");
   const [amount, setAmount] = useState("");
@@ -43,6 +52,10 @@ export function RecurringExpensesScreen() {
   const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([]);
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [items, setItems] = useState<RecurringExpense[]>([]);
+  const [editingItem, setEditingItem] = useState<RecurringExpense | null>(null);
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!scope) return;
@@ -65,26 +78,94 @@ export function RecurringExpensesScreen() {
     }, [load])
   );
 
-  const save = async () => {
-    if (!scope || !categoryId) return;
-    const amountCents = Math.round(Number(amount || "0") * 100);
-    if (!title.trim() || amountCents <= 0 || !parseDateKey(nextDueDate)) return;
-
-    await RecurringExpenseRepository.create(scope, {
-      title: title.trim(),
-      amountCents,
-      currency: preferredCurrency,
-      categoryId,
-      description: description.trim() || null,
-      frequency,
-      nextDueDate,
-    });
-
+  const resetForm = () => {
+    setEditingItem(null);
     setTitle("");
     setAmount("");
     setDescription("");
+    setFrequency("monthly");
     setNextDueDate(formatDateKey(new Date()));
-    await load();
+    setShowDatePicker(false);
+    setMutationError(null);
+  };
+
+  const save = async () => {
+    if (!scope || !categoryId) return;
+    const amountCents = parseAmountCents(amount);
+    if (!title.trim() || amountCents <= 0 || !parseDateKey(nextDueDate)) {
+      setMutationError(t("recurring.validation"));
+      return;
+    }
+
+    const savingKey = editingItem?.id ?? "new";
+    setSavingId(savingKey);
+    setMutationError(null);
+    try {
+      const input = {
+        title: title.trim(),
+        amountCents,
+        currency: editingItem?.currency ?? preferredCurrency,
+        categoryId,
+        description: description.trim() || null,
+        frequency,
+        nextDueDate,
+      };
+
+      if (editingItem) {
+        await RecurringExpenseRepository.update(editingItem, input);
+      } else {
+        await RecurringExpenseRepository.create(scope, input);
+      }
+
+      resetForm();
+      await load();
+    } catch (error) {
+      setMutationError((error as Error).message || t("errors.mutationSyncFailed"));
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const startEditing = (item: RecurringExpense) => {
+    setEditingItem(item);
+    setTitle(item.title);
+    setAmount((item.amountCents / 100).toFixed(2));
+    setDescription(item.description ?? "");
+    setFrequency(item.frequency);
+    setNextDueDate(item.nextDueDate);
+    setCategoryId(item.categoryId);
+    setConfirmingDeleteId(null);
+    setMutationError(null);
+    scrollRef.current?.scrollTo({ y: 0, animated: true });
+  };
+
+  const toggleActive = async (item: RecurringExpense) => {
+    if (!scope) return;
+    setSavingId(item.id);
+    setMutationError(null);
+    try {
+      await RecurringExpenseRepository.setActive(scope, item.id, !item.isActive);
+      await load();
+    } catch (error) {
+      setMutationError((error as Error).message || t("errors.mutationSyncFailed"));
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const deleteItem = async (item: RecurringExpense) => {
+    setSavingId(item.id);
+    setMutationError(null);
+    try {
+      await RecurringExpenseRepository.softDelete(item, new Date().toISOString());
+      setConfirmingDeleteId(null);
+      if (editingItem?.id === item.id) resetForm();
+      await load();
+    } catch (error) {
+      setMutationError((error as Error).message || t("errors.mutationSyncFailed"));
+    } finally {
+      setSavingId(null);
+    }
   };
 
   const onDateChange = (_event: DateTimePickerEvent, selected?: Date) => {
@@ -106,7 +187,7 @@ export function RecurringExpensesScreen() {
   if (!scope) return null;
 
   return (
-    <AppScreen scroll>
+    <AppScreen scroll scrollRef={scrollRef}>
       <ScreenHeader
         title={t("recurring.title")}
         subtitle={t("recurring.subtitle")}
@@ -115,6 +196,9 @@ export function RecurringExpensesScreen() {
       <Text style={styles.note}>{t("recurring.localOnlyNote")}</Text>
 
       <AppCard style={styles.editor}>
+        {editingItem ? (
+          <Text style={styles.editorTitle}>{t("recurring.edit")}</Text>
+        ) : null}
         <AppInput label={t("common.title")} value={title} onChangeText={setTitle} />
         <AppInput
           label={t("common.amount")}
@@ -172,31 +256,41 @@ export function RecurringExpensesScreen() {
             <Text style={styles.dateText}>{formatDate(nextDueDate)}</Text>
           </Pressable>
         )}
-        <AppButton label={t("recurring.add")} onPress={save} />
+        {mutationError ? <Text style={styles.error}>{mutationError}</Text> : null}
+        {editingItem ? (
+          <View style={styles.editorActions}>
+            <AppButton
+              label={t("common.cancel")}
+              variant="secondary"
+              disabled={savingId === editingItem.id}
+              onPress={resetForm}
+            />
+            <AppButton
+              label={t("recurring.saveChanges")}
+              disabled={savingId === editingItem.id}
+              onPress={save}
+            />
+          </View>
+        ) : (
+          <AppButton
+            label={t("recurring.add")}
+            disabled={savingId === "new"}
+            onPress={save}
+          />
+        )}
       </AppCard>
 
       {items.length === 0 ? (
         <EmptyState title={t("recurring.title")} body={t("recurring.empty")} />
       ) : (
         items.map((item) => {
-          const categoryName = categories.find((category) => category.id === item.categoryId)?.name;
+          const categoryName = categories.find(
+            (category) => category.id === item.categoryId
+          )?.name;
+          const isSaving = savingId === item.id;
           return (
             <AppCard key={item.id} style={styles.item}>
-              <View style={styles.itemHeader}>
-                <Text style={styles.itemTitle}>{item.title}</Text>
-                <AppButton
-                  label={item.isActive ? t("common.archive") : t("categories.restore")}
-                  variant="secondary"
-                  onPress={async () => {
-                    await RecurringExpenseRepository.setActive(
-                      scope,
-                      item.id,
-                      !item.isActive
-                    );
-                    await load();
-                  }}
-                />
-              </View>
+              <Text style={styles.itemTitle}>{item.title}</Text>
               <Text style={styles.itemText}>
                 {formatCurrency(item.amountCents, item.currency)} · {categoryName}
               </Text>
@@ -206,6 +300,53 @@ export function RecurringExpensesScreen() {
               <Text style={styles.itemText}>
                 {t("recurring.frequency")}: {item.frequency === "monthly" ? t("common.monthly") : t("common.weekly")}
               </Text>
+              <View style={styles.itemActions}>
+                <AppButton
+                  label={t("common.edit")}
+                  variant="secondary"
+                  disabled={isSaving}
+                  onPress={() => startEditing(item)}
+                />
+                <AppButton
+                  label={item.isActive ? t("common.archive") : t("common.restore")}
+                  variant="secondary"
+                  disabled={isSaving}
+                  onPress={() => toggleActive(item)}
+                />
+                <AppButton
+                  label={t("common.delete")}
+                  variant="danger"
+                  disabled={isSaving}
+                  onPress={() => {
+                    setConfirmingDeleteId(item.id);
+                    setMutationError(null);
+                  }}
+                />
+              </View>
+              {confirmingDeleteId === item.id ? (
+                <View style={styles.deleteConfirmation}>
+                  <Text style={styles.confirmTitle}>
+                    {t("recurring.deleteConfirmTitle")}
+                  </Text>
+                  <Text style={styles.confirmBody}>
+                    {t("recurring.deleteConfirmBody")}
+                  </Text>
+                  <View style={styles.editorActions}>
+                    <AppButton
+                      label={t("common.cancel")}
+                      variant="secondary"
+                      disabled={isSaving}
+                      onPress={() => setConfirmingDeleteId(null)}
+                    />
+                    <AppButton
+                      label={t("common.delete")}
+                      variant="danger"
+                      disabled={isSaving}
+                      onPress={() => deleteItem(item)}
+                    />
+                  </View>
+                </View>
+              ) : null}
             </AppCard>
           );
         })
@@ -252,6 +393,12 @@ const styles = StyleSheet.create({
   editor: {
     marginBottom: SPACING.md,
   },
+  editorTitle: {
+    marginBottom: SPACING.sm,
+    fontFamily: FONTS.display,
+    fontSize: 18,
+    color: COLORS.text,
+  },
   chips: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -279,18 +426,23 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: COLORS.text,
   },
+  error: {
+    marginBottom: SPACING.sm,
+    fontFamily: FONTS.body,
+    fontSize: 12,
+    color: COLORS.danger,
+  },
+  editorActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: SPACING.sm,
+    marginTop: SPACING.sm,
+  },
   item: {
     marginBottom: SPACING.sm,
   },
-  itemHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: SPACING.sm,
-    marginBottom: 8,
-  },
   itemTitle: {
-    flex: 1,
+    marginBottom: 8,
     fontFamily: FONTS.display,
     fontSize: 18,
     color: COLORS.text,
@@ -300,6 +452,29 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.textMuted,
     marginBottom: 4,
+  },
+  itemActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: SPACING.xs,
+    marginTop: SPACING.sm,
+  },
+  deleteConfirmation: {
+    marginTop: SPACING.sm,
+    padding: SPACING.md,
+    borderRadius: RADII.sm,
+    backgroundColor: COLORS.surfaceMuted,
+  },
+  confirmTitle: {
+    fontFamily: FONTS.display,
+    fontSize: 16,
+    color: COLORS.text,
+  },
+  confirmBody: {
+    marginTop: 4,
+    fontFamily: FONTS.body,
+    fontSize: 13,
+    color: COLORS.textMuted,
   },
   modalBackdrop: {
     flex: 1,
@@ -328,3 +503,8 @@ const webDateInputStyle = {
   width: "100%",
   boxSizing: "border-box",
 } as const;
+
+function parseAmountCents(value: string): number {
+  const amount = Number(value || "0");
+  return Number.isFinite(amount) ? Math.round(amount * 100) : 0;
+}

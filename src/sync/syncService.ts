@@ -82,6 +82,7 @@ type RemoteRecurringExpenseRow = {
    is_active: number;
    created_at: string;
    updated_at: string;
+   deleted_at: string | null;
 };
 
 /**
@@ -456,7 +457,7 @@ export async function pullRemoteRecurringExpenses(userId: string): Promise<void>
       const { data, error } = await supabase
          .from("recurring_expenses")
          .select(
-            "id,user_id,title,amount_cents,currency,category_id,description,frequency,next_due_date,last_generated_date,is_active,created_at,updated_at"
+            "id,user_id,title,amount_cents,currency,category_id,description,frequency,next_due_date,last_generated_date,is_active,created_at,updated_at,deleted_at"
          )
          .eq("user_id", userId)
          .range(from, to);
@@ -799,6 +800,7 @@ function mapRemoteRecurringExpense(
       isActive: row.is_active,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      deletedAt: row.deleted_at,
    };
 }
 
@@ -819,6 +821,7 @@ function mapLocalRecurringExpenseToRemote(
       is_active: item.isActive,
       created_at: item.createdAt,
       updated_at: item.updatedAt,
+      deleted_at: item.deletedAt,
    };
 }
 
@@ -1155,7 +1158,7 @@ async function fetchRemoteRecurringExpenseMap(
    const { data, error } = await supabase
       .from("recurring_expenses")
       .select(
-         "id,user_id,title,amount_cents,currency,category_id,description,frequency,next_due_date,last_generated_date,is_active,created_at,updated_at"
+         "id,user_id,title,amount_cents,currency,category_id,description,frequency,next_due_date,last_generated_date,is_active,created_at,updated_at,deleted_at"
       )
       .eq("user_id", userId);
 
@@ -1282,8 +1285,8 @@ async function insertLocalRecurringExpense(
       INSERT INTO recurring_expenses (
          id, title, amountCents, currency, categoryId, description,
          frequency, nextDueDate, lastGeneratedDate, isActive,
-         createdAt, updatedAt, ownerKey, userId
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+         createdAt, updatedAt, deletedAt, ownerKey, userId
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
       `,
       [
          item.id,
@@ -1298,6 +1301,7 @@ async function insertLocalRecurringExpense(
          item.isActive,
          item.createdAt,
          item.updatedAt,
+         item.deletedAt,
          item.ownerKey,
          item.userId,
       ]
@@ -1312,7 +1316,7 @@ async function updateLocalRecurringExpense(
       UPDATE recurring_expenses
       SET title = ?, amountCents = ?, currency = ?, categoryId = ?, description = ?,
           frequency = ?, nextDueDate = ?, lastGeneratedDate = ?, isActive = ?,
-          createdAt = ?, updatedAt = ?, ownerKey = ?, userId = ?
+          createdAt = ?, updatedAt = ?, deletedAt = ?, ownerKey = ?, userId = ?
       WHERE id = ?
         AND ownerKey = ?;
       `,
@@ -1328,6 +1332,7 @@ async function updateLocalRecurringExpense(
          item.isActive,
          item.createdAt,
          item.updatedAt,
+         item.deletedAt,
          item.ownerKey,
          item.userId,
          item.id,
