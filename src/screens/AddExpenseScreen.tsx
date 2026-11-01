@@ -24,7 +24,7 @@ import {
 import { RootStackParamList } from "../navigation/RootNavigator";
 import { useAppInitStore } from "../state/appInitStore";
 import { useSettingsStore } from "../settings/settingsStore";
-import { formatAmountInput, parseAmountInput } from "../utils/amountInput";
+import { applyAmountInputChange, formatAmountInput } from "../utils/amountInput";
 import { formatDateKey, parseDateKey } from "../utils/date";
 import { generateUUID } from "../utils/uuid";
 import { COLORS, FONTS, RADII, SPACING } from "../theme/tokens";
@@ -179,9 +179,11 @@ export function AddExpenseScreen({ navigation, route }: Props) {
         <AppInput
           label={t("common.amount")}
           value={amountInput}
-          onChangeText={(value) => setAmountCents(parseAmountInput(value))}
+          onChangeText={(value) =>
+            setAmountCents((current) => applyAmountInputChange(current, value))
+          }
           keyboardType="number-pad"
-          selection={{ start: amountInput.length }}
+          selection={{ start: amountInput.length, end: amountInput.length }}
           error={errors.amount}
         />
         <AppInput
